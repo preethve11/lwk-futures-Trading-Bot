@@ -1,0 +1,41 @@
+# Env and secrets (never commit — local only; .env.example is the template)
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# Logs and data
+logs/
+*.log
+trades_log.csv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
