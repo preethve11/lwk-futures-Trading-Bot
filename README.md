@@ -158,12 +158,6 @@ Expectancy: 12.50 USD/trade
 
 ---
 
-## License
-
-MIT (or your chosen license).
-
----
-
 ## Contribution Guide
 
 1. Fork the repo.
