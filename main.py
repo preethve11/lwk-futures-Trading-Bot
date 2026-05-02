@@ -78,7 +78,12 @@ def run_backtest(config_path: Path | None) -> int:
     )
     limit = 500
     df = client.get_klines(config.symbol, config.timeframe, limit=limit)
-    result = engine.run(df, symbol=config.symbol)
+    result = engine.run(
+        df,
+        symbol=config.symbol,
+        start_date=config.backtest_start,
+        end_date=config.backtest_end,
+    )
     # Print metrics
     m = result.metrics
     if m:
