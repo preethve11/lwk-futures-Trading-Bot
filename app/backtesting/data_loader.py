@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import pandas as pd
 
@@ -121,7 +121,7 @@ class BinanceHistoricalDataLoader:
                 break
 
             rows.extend(batch)
-            last_open_time = int(batch[-1][0])
+            last_open_time = int(cast(str | bytes | bytearray | int, batch[-1][0]))
             next_start_ms = last_open_time + 1
             if start_ms is not None and next_start_ms <= start_ms:
                 break

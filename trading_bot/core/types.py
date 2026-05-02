@@ -6,7 +6,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 
 class SignalSide(str, Enum):
@@ -38,7 +37,7 @@ class Signal:
     take_profit_price: float
     quantity: float
     timestamp: datetime
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass

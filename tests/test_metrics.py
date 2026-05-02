@@ -3,7 +3,6 @@
 import pytest
 from trading_bot.analytics.metrics import (
     sharpe_ratio,
-    sortino_ratio,
     max_drawdown,
     win_rate,
     profit_factor,

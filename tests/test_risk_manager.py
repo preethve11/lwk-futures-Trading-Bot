@@ -1,7 +1,6 @@
 """Unit tests for risk.manager."""
 
-import pytest
-from trading_bot.risk.manager import RiskManager, RiskResult
+from trading_bot.risk.manager import RiskManager
 from trading_bot.core.types import SignalSide
 
 

@@ -6,9 +6,7 @@ Optional: rolling windows for parameter optimization without lookahead.
 from __future__ import annotations
 import logging
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Any
-
-import pandas as pd
+from typing import List, Optional
 
 logger = logging.getLogger("trading_bot.backtest.walk_forward")
 

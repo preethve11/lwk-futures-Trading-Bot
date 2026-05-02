@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from dotenv import load_dotenv
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -102,14 +102,12 @@ class Settings(BaseSettings):
     def normalize_log_level(cls, value: str) -> str:
         return value.strip().upper()
 
-    @computed_field
     @property
     def active_binance_api_key(self) -> str:
         if self.use_testnet:
             return self.binance_testnet_api_key or self.binance_api_key
         return self.binance_mainnet_api_key or self.binance_api_key
 
-    @computed_field
     @property
     def active_binance_api_secret(self) -> str:
         if self.use_testnet:

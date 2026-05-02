@@ -7,7 +7,7 @@ from __future__ import annotations
 import random
 from typing import List, Optional
 
-from trading_bot.analytics.metrics import max_drawdown, compute_metrics
+from trading_bot.analytics.metrics import max_drawdown
 
 
 def monte_carlo_trades(pnls: List[float], n_simulations: int = 1000, seed: Optional[int] = None) -> List[float]:

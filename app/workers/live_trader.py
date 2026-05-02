@@ -152,7 +152,7 @@ class LiveTrader:
             testnet=self.settings.use_testnet,
         )
 
-    def _create_risk_manager(self, symbol_info: dict | None) -> RiskManager:
+    def _create_risk_manager(self, symbol_info: dict[str, object] | None) -> RiskManager:
         return RiskManager(
             risk_per_trade_usd=self.settings.risk_per_trade_usd,
             max_daily_loss_usd=self.settings.max_daily_loss_usd,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import pandas as pd
 
@@ -29,7 +29,7 @@ class ExecutionClient(ABC):
         pass
 
     @abstractmethod
-    def get_symbol_info(self, symbol: str) -> Optional[dict]:
+    def get_symbol_info(self, symbol: str) -> Optional[dict[str, object]]:
         """Exchange symbol info (filters, etc.)."""
         pass
 
@@ -52,6 +52,6 @@ class ExecutionClient(ABC):
         """Set leverage for symbol."""
         pass
 
-    def fetch_recent_trades(self, symbol: str, limit: int = 100) -> List[dict]:
+    def fetch_recent_trades(self, symbol: str, limit: int = 100) -> List[dict[str, object]]:
         """Optional: recent trades for PnL reconciliation. Default empty."""
         return []

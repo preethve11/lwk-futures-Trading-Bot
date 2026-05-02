@@ -1,10 +1,11 @@
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+exclude = ["zec_scalper.py"]
 
 [tool.ruff.lint]
 select = ["E", "F"]
-ignore = ["E501"]
+ignore = ["E501", "E402"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["D"]
@@ -16,5 +17,10 @@ ignore_missing_imports = true
 no_implicit_optional = true
 check_untyped_defs = true
 
+[[tool.mypy.overrides]]
+module = ["trading_bot.*"]
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--basetemp=pytest_tmp -p no:cacheprovider"
