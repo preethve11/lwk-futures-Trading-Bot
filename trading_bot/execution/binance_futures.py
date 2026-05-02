@@ -3,26 +3,30 @@ Binance Futures execution with retry and rate-limit handling.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from functools import wraps
 import logging
 import time
-from typing import Optional, List
+from typing import Any, Optional
 
 import pandas as pd
 
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from trading_bot.core.types import Signal, SignalSide, Position, Bar
+from trading_bot.core.types import Position, Signal, SignalSide
 from trading_bot.execution.base import ExecutionClient, OrderResult
 from trading_bot.utils.exchange_filters import round_price, parse_symbol_filters
 
 logger = logging.getLogger("trading_bot.execution.binance")
 
 
-def retry_on_rate_limit(max_retries: int = 3, base_delay: float = 1.0):
+def retry_on_rate_limit(max_retries: int = 3, base_delay: float = 1.0) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator: retry on 429 or 418 (rate limit)."""
-    def decorator(f):
-        def wrapped(*args, **kwargs):
+    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(f)
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
             last_exc = None
             for attempt in range(max_retries):
                 try:
@@ -55,7 +59,7 @@ class BinanceFuturesClient(ExecutionClient):
             logger.info("Binance Futures: using TESTNET")
         else:
             logger.info("Binance Futures: using LIVE")
-        self._symbol_info_cache: Optional[dict] = None
+        self._symbol_info_cache: dict[str, dict] = {}
 
     @retry_on_rate_limit(max_retries=3, base_delay=1.0)
     def get_klines(self, symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
@@ -69,12 +73,19 @@ class BinanceFuturesClient(ExecutionClient):
         return df[["time", "open", "high", "low", "close", "volume"]]
 
     @retry_on_rate_limit(max_retries=2)
-    def get_symbol_info(self, symbol: str) -> Optional[dict]:
+    def get_symbol_info(self, symbol: str, *, force_refresh: bool = False) -> Optional[dict]:
+        if not force_refresh and symbol in self._symbol_info_cache:
+            return self._symbol_info_cache[symbol]
         info = self._client.futures_exchange_info()
         for s in info.get("symbols", []):
             if s.get("symbol") == symbol:
+                self._symbol_info_cache[symbol] = s
                 return s
         return None
+
+    def refresh_symbol_info(self, symbol: str) -> Optional[dict]:
+        """Force refresh cached symbol filters after an exchange-side error."""
+        return self.get_symbol_info(symbol, force_refresh=True)
 
     @retry_on_rate_limit(max_retries=2)
     def get_open_position(self, symbol: str) -> Optional[Position]:
@@ -127,10 +138,11 @@ class BinanceFuturesClient(ExecutionClient):
             )
             return OrderResult(success=True, order_id=str(res.get("orderId")), avg_price=avg, quantity=qty)
         except BinanceAPIException as e:
+            self.refresh_symbol_info(symbol)
             logger.exception("Binance order error: %s", e)
             return OrderResult(success=False, message=str(e))
 
-    def fetch_recent_trades(self, symbol: str, limit: int = 100) -> List[dict]:
+    def fetch_recent_trades(self, symbol: str, limit: int = 100) -> list[dict]:
         try:
             return self._client.futures_account_trades(symbol=symbol, limit=limit)
         except Exception as e:

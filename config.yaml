@@ -5,6 +5,7 @@ api:
   use_testnet: true
 
 strategy:
+  name: ema_rsi_vwap
   symbol: ZECUSDT
   timeframe: 5m
   ema_fast: 9
