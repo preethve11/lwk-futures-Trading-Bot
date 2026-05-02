@@ -25,6 +25,7 @@ class BinanceKlineClient(Protocol):
         limit: int = 1500,
     ) -> list[list[object]]:
         """Return raw Binance futures kline rows."""
+        ...
 
 
 @dataclass(frozen=True)
