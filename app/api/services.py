@@ -48,6 +48,23 @@ class RiskService:
     def set_kill_switch(self, *, enabled: bool, reason: str) -> RiskStateModel:
         return self.repository.set_kill_switch(enabled=enabled, reason=reason)
 
+    def update_state(
+        self,
+        *,
+        kill_switch_enabled: bool | None,
+        manual_pause_enabled: bool | None,
+        daily_loss_locked: bool | None,
+        drawdown_locked: bool | None,
+        reason: str | None,
+    ) -> RiskStateModel:
+        return self.repository.update_state(
+            kill_switch_enabled=kill_switch_enabled,
+            manual_pause_enabled=manual_pause_enabled,
+            daily_loss_locked=daily_loss_locked,
+            drawdown_locked=drawdown_locked,
+            reason=reason,
+        )
+
 
 class BacktestService:
     """Runs API-requested backtests and persists results through repositories."""

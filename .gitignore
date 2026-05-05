@@ -33,6 +33,8 @@ build/
 dist/
 *.egg-info/
 .eggs/
+node_modules/
+*.tsbuildinfo
 
 # Testing
 .pytest_cache/

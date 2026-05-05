@@ -14,6 +14,7 @@ from app.persistence.models import (
     ConfigModel,
     OrderLifecycleState,
     OrderModel,
+    PositionModel,
     RiskEventModel,
     RiskStateModel,
     SignalModel,
@@ -309,6 +310,27 @@ class RiskEventRepository:
         self.session.flush()
         return model
 
+    def list_recent(self, *, symbol: str | None = None, limit: int = 100) -> list[RiskEventModel]:
+        statement = select(RiskEventModel)
+        if symbol is not None:
+            statement = statement.where(RiskEventModel.symbol == symbol)
+        statement = statement.order_by(RiskEventModel.created_at.desc()).limit(limit)
+        return list(self.session.scalars(statement))
+
+
+class PositionRepository:
+    """Persistence operations for position snapshots."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_recent(self, *, symbol: str | None = None, limit: int = 100) -> list[PositionModel]:
+        statement = select(PositionModel)
+        if symbol is not None:
+            statement = statement.where(PositionModel.symbol == symbol)
+        statement = statement.order_by(PositionModel.opened_at.desc()).limit(limit)
+        return list(self.session.scalars(statement))
+
 
 class ConfigRepository:
     """Persistence operations for API-managed config snapshots."""
@@ -354,6 +376,30 @@ class RiskStateRepository:
         model = self.get_or_create()
         model.kill_switch_enabled = enabled
         model.reason = reason
+        model.updated_at = utc_now()
+        self.session.flush()
+        return model
+
+    def update_state(
+        self,
+        *,
+        kill_switch_enabled: bool | None = None,
+        manual_pause_enabled: bool | None = None,
+        daily_loss_locked: bool | None = None,
+        drawdown_locked: bool | None = None,
+        reason: str | None = None,
+    ) -> RiskStateModel:
+        model = self.get_or_create()
+        if kill_switch_enabled is not None:
+            model.kill_switch_enabled = kill_switch_enabled
+        if manual_pause_enabled is not None:
+            model.manual_pause_enabled = manual_pause_enabled
+        if daily_loss_locked is not None:
+            model.daily_loss_locked = daily_loss_locked
+        if drawdown_locked is not None:
+            model.drawdown_locked = drawdown_locked
+        if reason is not None:
+            model.reason = reason
         model.updated_at = utc_now()
         self.session.flush()
         return model

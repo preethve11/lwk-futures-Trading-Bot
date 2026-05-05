@@ -161,6 +161,43 @@ class KillSwitchRequest(BaseModel):
     reason: str = ""
 
 
+class RiskStateUpdateRequest(BaseModel):
+    kill_switch_enabled: bool | None = None
+    manual_pause_enabled: bool | None = None
+    daily_loss_locked: bool | None = None
+    drawdown_locked: bool | None = None
+    reason: str | None = None
+
+
+class RiskEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bot_session_id: int | None
+    symbol: str
+    event_type: str
+    severity: str
+    reason: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+
+class PositionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bot_session_id: int | None
+    symbol: str
+    side: str
+    quantity: float
+    entry_price: float
+    unrealized_pnl: float
+    leverage: int
+    status: str
+    opened_at: datetime
+    closed_at: datetime | None
+
+
 class LiveEvent(BaseModel):
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)

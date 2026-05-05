@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 from app.api.main import create_app
 from app.core.config import Settings
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
-from app.persistence.repositories import BotSessionRepository, SignalRepository, TradeRepository
+from app.persistence.models import PositionModel
+from app.persistence.repositories import BotSessionRepository, RiskEventRepository, SignalRepository, TradeRepository
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Signal, SignalSide, Trade
 
@@ -82,6 +83,26 @@ def _seed_data(factory: SessionFactory) -> None:
                 avg_loss=0.0,
             ),
         )
+        session.add(
+            PositionModel(
+                bot_session_id=bot_session.id,
+                symbol="ZECUSDT",
+                side="BUY",
+                quantity=0.5,
+                entry_price=100.0,
+                unrealized_pnl=2.0,
+                leverage=5,
+                status="open",
+                opened_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        RiskEventRepository(session).create(
+            bot_session_id=bot_session.id,
+            symbol="ZECUSDT",
+            event_type="manual_review_required",
+            severity="CRITICAL",
+            reason="test",
+        )
 
 
 def test_api_rejects_invalid_token() -> None:
@@ -117,6 +138,8 @@ def test_repository_backed_read_endpoints() -> None:
     signals = client.get("/signals", headers=_headers())
     sessions = client.get("/sessions", headers=_headers())
     backtests = client.get("/backtests", headers=_headers())
+    positions = client.get("/positions", headers=_headers())
+    risk_events = client.get("/risk/events", headers=_headers())
 
     assert trades.status_code == 200
     assert trades.json()[0]["symbol"] == "ZECUSDT"
@@ -128,6 +151,10 @@ def test_repository_backed_read_endpoints() -> None:
     assert sessions.json()[0]["mode"] == "paper"
     assert backtests.status_code == 200
     assert backtests.json()[0]["total_trades"] == 1
+    assert positions.status_code == 200
+    assert positions.json()[0]["status"] == "open"
+    assert risk_events.status_code == 200
+    assert risk_events.json()[0]["severity"] == "CRITICAL"
 
 
 def test_sessions_start_stop_and_risk_kill_switch() -> None:
@@ -141,12 +168,20 @@ def test_sessions_start_stop_and_risk_kill_switch() -> None:
         headers=_headers(),
         json={"enabled": True, "reason": "operator requested"},
     )
+    updated_state = client.post(
+        "/risk/state",
+        headers=_headers(),
+        json={"manual_pause_enabled": True, "daily_loss_locked": True, "reason": "dashboard"},
+    )
 
     assert started.status_code == 200
     assert stopped.status_code == 200
     assert stopped.json()["status"] == "stopped"
     assert risk_state.status_code == 200
     assert risk_state.json()["kill_switch_enabled"] is True
+    assert updated_state.status_code == 200
+    assert updated_state.json()["manual_pause_enabled"] is True
+    assert updated_state.json()["daily_loss_locked"] is True
 
 
 def test_websocket_receives_live_events() -> None:
