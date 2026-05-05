@@ -3,7 +3,9 @@
 Trading Bot CLI: backtest | live
 Usage:
   python main.py backtest [--config config.yaml]
+  python main.py backtest-multi [--config config.yaml]
   python main.py live [--config config.yaml]
+  python main.py api [--config config.yaml]
 """
 
 from __future__ import annotations
@@ -11,16 +13,23 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.backtesting.data_loader import load_csv_ohlcv
+from app.backtesting.multi_symbol import BacktestReportExporter, MultiSymbolBacktestRunner
+from app.core.config import Settings
+from app.persistence.database import create_session_factory, init_db, session_scope
+from app.persistence.repositories import TradeRepository
 from app.strategies.registry import create_default_strategy_registry
 from app.workers.live_trader import LiveTrader
-from trading_bot.backtesting.engine import BacktestEngine
+from trading_bot.backtesting.engine import BacktestEngine, BacktestRecorder, BacktestResult
 from trading_bot.core.config import load_config
 from trading_bot.core.logger import setup_logging
 from trading_bot.execution.binance_futures import BinanceFuturesClient
@@ -51,6 +60,7 @@ def run_backtest(config_path: Path | None) -> int:
         initial_capital=settings.backtest_initial_capital,
         slippage_bps=settings.slippage_bps,
         fee_bps=settings.fee_bps,
+        recorder=_create_backtest_recorder(settings),
     )
 
     if settings.historical_data_csv:
@@ -90,6 +100,145 @@ def run_backtest(config_path: Path | None) -> int:
     return 0
 
 
+def run_multi_backtest(config_path: Path | None, report_json: Path | None, report_html: Path | None) -> int:
+    """Run the configured strategy across all configured symbols and export a report."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    logger = logging.getLogger("trading_bot")
+    datasets = _load_multi_symbol_datasets(settings, logger)
+    if not datasets:
+        return 1
+
+    session_factory = create_session_factory(settings.database_url)
+    try:
+        init_db(session_factory)
+    except Exception as exc:
+        logger.exception("Could not initialize persistence database", extra={"error": str(exc)})
+
+    with session_scope(session_factory) as session:
+        report = MultiSymbolBacktestRunner(settings, session).run(
+            datasets,
+            timeframe=settings.timeframe,
+            start_date=settings.backtest_start,
+            end_date=settings.backtest_end,
+        )
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    json_path = report_json or settings.backtest_report_dir / f"multi_symbol_{timestamp}.json"
+    BacktestReportExporter.write_json(report, json_path)
+    if report_html is not None:
+        BacktestReportExporter.write_html(report, report_html)
+
+    metrics = report.aggregate.metrics
+    print("\n--- Multi-Symbol Backtest Results ---")
+    print(f"Symbols: {', '.join(symbol_report.symbol for symbol_report in report.symbols)}")
+    print(f"Total trades: {metrics.total_trades}")
+    print(f"Total return: {metrics.total_return_pct:.2f}%")
+    print(f"Sharpe ratio: {metrics.sharpe_ratio:.2f}")
+    print(f"Sortino ratio: {metrics.sortino_ratio:.2f}")
+    print(f"Max drawdown: {metrics.max_drawdown_pct:.2f}%")
+    print(f"Win rate: {metrics.win_rate * 100:.1f}%")
+    print(f"Profit factor: {metrics.profit_factor:.2f}")
+    print(f"JSON report: {json_path}")
+    if report_html is not None:
+        print(f"HTML report: {report_html}")
+    return 0
+
+
+def _load_multi_symbol_datasets(settings: Settings, logger: logging.Logger) -> dict[str, pd.DataFrame]:
+    symbols = settings.symbols or [settings.symbol]
+    if settings.historical_data_dir is not None:
+        datasets = {}
+        for symbol in symbols:
+            csv_path = _resolve_symbol_csv(settings.historical_data_dir, symbol, settings.timeframe)
+            if csv_path is None:
+                logger.error("Missing historical CSV for symbol", extra={"symbol": symbol})
+                return {}
+            datasets[symbol] = load_csv_ohlcv(csv_path, start=settings.backtest_start, end=settings.backtest_end)
+        return datasets
+
+    if settings.historical_data_csv is not None:
+        if len(symbols) != 1:
+            logger.error("HISTORICAL_DATA_DIR is required when backtesting multiple symbols from CSV files")
+            return {}
+        return {symbols[0]: load_csv_ohlcv(settings.historical_data_csv, start=settings.backtest_start, end=settings.backtest_end)}
+
+    if not settings.active_binance_api_key or not settings.active_binance_api_secret:
+        logger.error("Multi-symbol backtest needs Binance API keys or HISTORICAL_DATA_DIR")
+        return {}
+
+    client = BinanceFuturesClient(
+        settings.active_binance_api_key,
+        settings.active_binance_api_secret,
+        testnet=settings.use_testnet,
+    )
+    return {symbol: client.get_klines(symbol, settings.timeframe, limit=500) for symbol in symbols}
+
+
+def _resolve_symbol_csv(directory: Path, symbol: str, timeframe: str) -> Path | None:
+    candidates = [
+        directory / f"{symbol}_{timeframe}.csv",
+        directory / f"{symbol.lower()}_{timeframe}.csv",
+        directory / f"{symbol}.csv",
+        directory / f"{symbol.lower()}.csv",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _create_backtest_recorder(settings: Settings) -> BacktestRecorder:
+    """Create a best-effort persistence recorder for backtest results."""
+    session_factory = create_session_factory(settings.database_url)
+    try:
+        init_db(session_factory)
+    except Exception as exc:
+        logging.getLogger("trading_bot").exception("Could not initialize persistence database", extra={"error": str(exc)})
+
+    def record(
+        result: BacktestResult,
+        symbol: str,
+        start_date: str | datetime | None,
+        end_date: str | datetime | None,
+    ) -> None:
+        if result.metrics is None:
+            return
+        try:
+            with session_scope(session_factory) as session:
+                repository = TradeRepository(session)
+                final_capital = result.equity_curve[-1] if result.equity_curve else settings.backtest_initial_capital
+                repository.create_backtest_run(
+                    strategy_name=settings.strategy_name,
+                    symbol=symbol,
+                    timeframe=settings.timeframe,
+                    initial_capital=settings.backtest_initial_capital,
+                    final_capital=final_capital,
+                    metrics=result.metrics,
+                    start_date=_coerce_datetime(start_date),
+                    end_date=_coerce_datetime(end_date),
+                    config_snapshot={
+                        "start_date": str(start_date) if start_date is not None else None,
+                        "end_date": str(end_date) if end_date is not None else None,
+                    },
+                )
+                for trade in result.trades:
+                    repository.create_from_trade(trade, source="backtest")
+        except Exception as exc:
+            logging.getLogger("trading_bot").exception("Could not persist backtest run", extra={"error": str(exc)})
+
+    return record
+
+
+def _coerce_datetime(value: str | datetime | None) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def run_live(config_path: Path | None) -> int:
     """Run live trading loop through the worker layer."""
     settings = load_config(config_path, ROOT)
@@ -99,11 +248,24 @@ def run_live(config_path: Path | None) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Trading Bot CLI")
-    parser.add_argument("mode", choices=["backtest", "live"], help="Run backtest or live")
+    parser.add_argument("mode", choices=["backtest", "backtest-multi", "live", "api"], help="Run backtest, live, or api")
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
+    parser.add_argument("--host", default="127.0.0.1", help="API host")
+    parser.add_argument("--port", type=int, default=8000, help="API port")
+    parser.add_argument("--report-json", type=Path, default=None, help="Multi-symbol JSON report path")
+    parser.add_argument("--report-html", type=Path, default=None, help="Optional multi-symbol HTML report path")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
+    if args.mode == "backtest-multi":
+        return run_multi_backtest(args.config, args.report_json, args.report_html)
+    if args.mode == "api":
+        import uvicorn
+
+        settings = load_config(args.config, ROOT)
+        setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+        uvicorn.run("app.api.main:app", host=args.host, port=args.port, reload=False)
+        return 0
     return run_live(args.config)
 
 

@@ -16,8 +16,12 @@ env/
 
 # Logs and data
 logs/
+reports/
 *.log
 trades_log.csv
+*.db
+*.db-shm
+*.db-wal
 
 # IDE
 .idea/
@@ -30,6 +34,8 @@ build/
 dist/
 *.egg-info/
 .eggs/
+node_modules/
+*.tsbuildinfo
 
 # Testing
 .pytest_cache/

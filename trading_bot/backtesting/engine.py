@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import pandas as pd
 
@@ -28,6 +28,9 @@ class BacktestResult:
     metrics: Optional[PerformanceMetrics] = None
 
 
+BacktestRecorder = Callable[[BacktestResult, str, str | datetime | None, str | datetime | None], None]
+
+
 class BacktestEngine:
     """
     Runs strategy on historical klines. Uses only closed bars (iloc up to -1).
@@ -41,12 +44,14 @@ class BacktestEngine:
         initial_capital: float = 10000.0,
         slippage_bps: float = 5.0,
         fee_bps: float = 4.0,
+        recorder: BacktestRecorder | None = None,
     ):
         self.strategy = strategy
         self.risk_manager = risk_manager
         self.initial_capital = initial_capital
         self.slippage_bps = slippage_bps
         self.fee_bps = fee_bps
+        self.recorder = recorder
 
     @staticmethod
     def _filter_date_range(
@@ -222,4 +227,7 @@ class BacktestEngine:
         for pnl in pnls:
             cum.append(cum[-1] + pnl)
         metrics = compute_metrics(pnls, cumulative_returns=[value / self.initial_capital for value in cum])
-        return BacktestResult(trades=trades, equity_curve=equity_curve, metrics=metrics)
+        result = BacktestResult(trades=trades, equity_curve=equity_curve, metrics=metrics)
+        if self.recorder is not None:
+            self.recorder(result, symbol, start_date, end_date)
+        return result

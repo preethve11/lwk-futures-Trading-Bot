@@ -7,7 +7,19 @@ from typing import List, Optional
 
 import pandas as pd
 
-from trading_bot.core.types import Signal, Position
+from trading_bot.core.types import Position, Signal, SignalSide
+
+
+@dataclass
+class ProtectedOrderResult:
+    """Verified bracket-order protection outcome."""
+
+    entry_order_id: Optional[str] = None
+    stop_order_id: Optional[str] = None
+    take_profit_order_id: Optional[str] = None
+    protected: bool = False
+    requires_manual_review: bool = False
+    message: str = ""
 
 
 @dataclass
@@ -18,6 +30,7 @@ class OrderResult:
     avg_price: Optional[float] = None
     quantity: Optional[float] = None
     message: str = ""
+    protected_order: Optional[ProtectedOrderResult] = None
 
 
 class ExecutionClient(ABC):
@@ -50,6 +63,21 @@ class ExecutionClient(ABC):
     @abstractmethod
     def set_leverage(self, symbol: str, leverage: int) -> None:
         """Set leverage for symbol."""
+        pass
+
+    @abstractmethod
+    def get_open_orders(self, symbol: str) -> List[dict[str, object]]:
+        """Return active exchange orders for a symbol."""
+        pass
+
+    @abstractmethod
+    def emergency_close_position(
+        self,
+        symbol: str,
+        side: SignalSide,
+        quantity: float,
+    ) -> OrderResult:
+        """Close an unprotected position with a reduce-only market order."""
         pass
 
     def fetch_recent_trades(self, symbol: str, limit: int = 100) -> List[dict[str, object]]:
