@@ -16,7 +16,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 from trading_bot.core.types import Position, Signal, SignalSide
-from trading_bot.execution.base import ExecutionClient, OrderResult
+from trading_bot.execution.base import ExecutionClient, OrderResult, ProtectedOrderResult
 from trading_bot.utils.exchange_filters import round_price, parse_symbol_filters
 
 logger = logging.getLogger("trading_bot.execution.binance")
@@ -126,21 +126,83 @@ class BinanceFuturesClient(ExecutionClient):
                 symbol=symbol, side=side, type="MARKET", quantity=str(qty)
             )
             avg = float(res.get("avgPrice") or res.get("price") or signal.entry_price)
-            # SL and TP
+            entry_order_id = str(res.get("orderId"))
             close_side = "SELL" if side == "BUY" else "BUY"
-            self._client.futures_create_order(
-                symbol=symbol, side=close_side, type="LIMIT", timeInForce="GTC",
-                quantity=str(qty), price=str(tp_r), reduceOnly=True
+            tp_order_id = None
+            stop_order_id = None
+            protection_errors: list[str] = []
+
+            try:
+                tp_res = self._client.futures_create_order(
+                    symbol=symbol, side=close_side, type="LIMIT", timeInForce="GTC",
+                    quantity=str(qty), price=str(tp_r), reduceOnly=True
+                )
+                tp_order_id = str(tp_res.get("orderId"))
+            except BinanceAPIException as e:
+                protection_errors.append(f"take-profit placement failed: {e}")
+
+            try:
+                stop_res = self._client.futures_create_order(
+                    symbol=symbol, side=close_side, type="STOP_MARKET",
+                    stopPrice=str(stop_r), quantity=str(qty), reduceOnly=True
+                )
+                stop_order_id = str(stop_res.get("orderId"))
+            except BinanceAPIException as e:
+                protection_errors.append(f"stop-loss placement failed: {e}")
+
+            protected = tp_order_id is not None and stop_order_id is not None
+            message = "; ".join(protection_errors) if protection_errors else "entry, stop, and take-profit placed"
+            if protection_errors:
+                self.refresh_symbol_info(symbol)
+                logger.critical(
+                    "Entry placed but protection order placement failed",
+                    extra={"symbol": symbol, "errors": protection_errors},
+                )
+            return OrderResult(
+                success=True,
+                order_id=entry_order_id,
+                avg_price=avg,
+                quantity=qty,
+                message=message,
+                protected_order=ProtectedOrderResult(
+                    entry_order_id=entry_order_id,
+                    stop_order_id=stop_order_id,
+                    take_profit_order_id=tp_order_id,
+                    protected=protected,
+                    requires_manual_review=not protected,
+                    message=message,
+                ),
             )
-            self._client.futures_create_order(
-                symbol=symbol, side=close_side, type="STOP_MARKET",
-                stopPrice=str(stop_r), quantity=str(qty), reduceOnly=True
-            )
-            return OrderResult(success=True, order_id=str(res.get("orderId")), avg_price=avg, quantity=qty)
         except BinanceAPIException as e:
             self.refresh_symbol_info(symbol)
             logger.exception("Binance order error: %s", e)
             return OrderResult(success=False, message=str(e))
+
+    @retry_on_rate_limit(max_retries=2)
+    def get_open_orders(self, symbol: str) -> list[dict[str, object]]:
+        return list(self._client.futures_get_open_orders(symbol=symbol))
+
+    @retry_on_rate_limit(max_retries=2)
+    def emergency_close_position(self, symbol: str, side: SignalSide, quantity: float) -> OrderResult:
+        close_side = "SELL" if side == SignalSide.LONG else "BUY"
+        try:
+            res = self._client.futures_create_order(
+                symbol=symbol,
+                side=close_side,
+                type="MARKET",
+                quantity=str(quantity),
+                reduceOnly=True,
+            )
+            return OrderResult(
+                success=True,
+                order_id=str(res.get("orderId")),
+                avg_price=float(res.get("avgPrice") or res.get("price") or 0.0),
+                quantity=quantity,
+                message="emergency market close submitted",
+            )
+        except BinanceAPIException as e:
+            logger.exception("Emergency close failed: %s", e)
+            return OrderResult(success=False, quantity=quantity, message=str(e))
 
     def fetch_recent_trades(self, symbol: str, limit: int = 100) -> list[dict]:
         try:

@@ -6,13 +6,13 @@ from sqlalchemy import select
 
 from app.core.config import Settings
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
-from app.persistence.models import BacktestRunModel, OrderLifecycleState, OrderModel, SignalModel, TradeModel
+from app.persistence.models import BacktestRunModel, OrderLifecycleState, OrderModel, RiskEventModel, SignalModel, TradeModel
 from app.persistence.repositories import BotSessionRepository, OrderRepository, SignalRepository, TradeRepository
 from app.persistence.state_machine import OrderStateMachine
 from app.workers.live_trader import LiveTrader
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Signal, SignalSide, Trade
-from trading_bot.execution.base import OrderResult
+from trading_bot.execution.base import OrderResult, ProtectedOrderResult
 
 
 def _session_factory() -> SessionFactory:
@@ -140,6 +140,12 @@ def test_live_trader_persists_signal_and_protected_order_result() -> None:
         order_id,
         OrderResult(success=True, order_id="123", avg_price=100.1, quantity=0.5),
     )
+    trader._record_reconciliation_result(
+        factory,
+        bot_session_id,
+        order_id,
+        reconciliation=_reconciliation_result(),
+    )
 
     assert signal_id is not None
     with session_scope(factory) as session:
@@ -147,3 +153,31 @@ def test_live_trader_persists_signal_and_protected_order_result() -> None:
         assert order is not None
         assert order.state == OrderLifecycleState.PROTECTED
         assert order.exchange_order_id == "123"
+        assert order.stop_order_id == "sl-123"
+        assert order.take_profit_order_id == "tp-123"
+        assert order.requires_manual_review is False
+        assert len(session.scalars(select(RiskEventModel)).all()) == 1
+
+
+def _reconciliation_result() -> object:
+    from app.workers.reconciliation import ReconciliationEvent, ReconciliationOutcome
+
+    return ReconciliationOutcome(
+        protected_order=ProtectedOrderResult(
+            entry_order_id="123",
+            stop_order_id="sl-123",
+            take_profit_order_id="tp-123",
+            protected=True,
+            requires_manual_review=False,
+            message="SL/TP protection verified",
+        ),
+        attempts=1,
+        events=[
+            ReconciliationEvent(
+                event_type="reconciliation_attempt",
+                severity="INFO",
+                reason="protection verified",
+                payload={"attempt": 1},
+            )
+        ],
+    )

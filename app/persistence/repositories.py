@@ -20,7 +20,7 @@ from app.persistence.models import (
 )
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Signal, Trade
-from trading_bot.execution.base import OrderResult
+from trading_bot.execution.base import OrderResult, ProtectedOrderResult
 
 
 class BotSessionRepository:
@@ -133,6 +133,22 @@ class OrderRepository:
         model.quantity = result.quantity if result.quantity is not None else model.quantity
         model.message = result.message
         model.state = OrderLifecycleState.ENTRY_PLACED if result.success else OrderLifecycleState.FAILED_UNPROTECTED
+        if result.protected_order is not None:
+            self._apply_protected_order_fields(model, result.protected_order, set_final_state=False)
+        self.session.flush()
+        return model
+
+    def apply_protected_order_result(
+        self,
+        order_id: int,
+        result: ProtectedOrderResult,
+        *,
+        emergency_close_order_id: str | None = None,
+    ) -> OrderModel:
+        model = self._get(order_id)
+        self._apply_protected_order_fields(model, result, set_final_state=True)
+        if emergency_close_order_id is not None:
+            model.emergency_close_order_id = emergency_close_order_id
         self.session.flush()
         return model
 
@@ -151,6 +167,22 @@ class OrderRepository:
         if model is None:
             raise ValueError(f"Order {order_id} not found")
         return model
+
+    def _apply_protected_order_fields(
+        self,
+        model: OrderModel,
+        result: ProtectedOrderResult,
+        *,
+        set_final_state: bool,
+    ) -> None:
+        model.exchange_order_id = result.entry_order_id or model.exchange_order_id
+        model.stop_order_id = result.stop_order_id
+        model.take_profit_order_id = result.take_profit_order_id
+        model.protected = result.protected
+        model.requires_manual_review = result.requires_manual_review
+        model.message = result.message
+        if set_final_state:
+            model.state = OrderLifecycleState.PROTECTED if result.protected else OrderLifecycleState.FAILED_UNPROTECTED
 
 
 class TradeRepository:

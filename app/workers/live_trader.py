@@ -9,16 +9,16 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from app.core.config import Settings
+from app.core.security import assert_live_trading_allowed
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
 from app.persistence.repositories import BotSessionRepository, OrderRepository, RiskEventRepository, SignalRepository
-from app.persistence.state_machine import OrderStateMachine
-from app.core.security import assert_live_trading_allowed
 from app.strategies.registry import StrategyRegistry, create_default_strategy_registry
+from app.workers.reconciliation import ReconciliationOutcome, ReconciliationWorker
 from trading_bot.core.types import Signal
+from trading_bot.execution.base import ExecutionClient, OrderResult
 from trading_bot.execution.binance_futures import BinanceFuturesClient
-from trading_bot.execution.base import OrderResult
 from trading_bot.risk.manager import RiskManager
-from trading_bot.utils.telegram import send_telegram
+from trading_bot.utils.alerts import AlertQueue, AlertSeverity
 from trading_bot.utils.timeframes import timeframe_minutes
 
 
@@ -30,13 +30,18 @@ class LiveTrader:
         settings: Settings,
         *,
         strategy_registry: StrategyRegistry | None = None,
-        client: BinanceFuturesClient | None = None,
+        client: ExecutionClient | None = None,
         session_factory: SessionFactory | None = None,
+        alert_queue: AlertQueue | None = None,
     ) -> None:
         self.settings = settings
         self.strategy_registry = strategy_registry or create_default_strategy_registry()
         self.client = client
         self.session_factory = session_factory
+        self.alert_queue = alert_queue or AlertQueue(
+            bot_token=settings.telegram_bot_token,
+            chat_id=settings.telegram_chat_id,
+        )
         self.logger = logging.getLogger("trading_bot.live_trader")
 
     def run_forever(self) -> int:
@@ -50,125 +55,147 @@ class LiveTrader:
         strategy = self.strategy_registry.create(self.settings.strategy_name, self.settings)
         session_factory = self._create_runtime_session_factory()
         bot_session_id = self._start_bot_session(session_factory)
+        reconciliation_worker = ReconciliationWorker(client, self.alert_queue)
         cooldown_s = timeframe_minutes(self.settings.timeframe) * 60
         last_signal_ts = 0.0
         last_hourly = datetime.now(timezone.utc)
 
-        send_telegram(
-            (
-                f"Trading bot starting | {self.settings.symbol} | "
-                f"testnet={self.settings.use_testnet} | leverage={self.settings.leverage}x"
-            ),
-            self.settings.telegram_bot_token,
-            self.settings.telegram_chat_id,
+        self.alert_queue.enqueue(
+            AlertSeverity.INFO,
+            "Trading bot starting",
+            {
+                "symbol": self.settings.symbol,
+                "testnet": self.settings.use_testnet,
+                "leverage": self.settings.leverage,
+            },
         )
 
-        while True:
-            try:
-                daily_loss = self._sync_daily_loss(client, risk_manager)
-                if not risk_manager.check_daily_loss():
-                    self.logger.warning("Daily loss cap reached", extra={"symbol": self.settings.symbol})
-                    self._record_risk_event(
-                        session_factory,
-                        bot_session_id,
-                        event_type="daily_loss_cap",
-                        severity="warning",
-                        reason="Daily loss cap reached",
-                    )
-                    time.sleep(60)
-                    continue
-
-                position = client.get_open_position(self.settings.symbol)
-                if position and position.quantity > 0:
-                    self.logger.info("Position open, waiting", extra={"symbol": self.settings.symbol})
-                    time.sleep(5)
-                    if (datetime.now(timezone.utc) - last_hourly) >= timedelta(minutes=55):
-                        send_telegram(
-                            (
-                                f"Hourly | {self.settings.symbol} | Open pos: {position.quantity} "
-                                f"@ {position.entry_price} | Daily loss: ${daily_loss:.2f}"
-                            ),
-                            self.settings.telegram_bot_token,
-                            self.settings.telegram_chat_id,
+        try:
+            while True:
+                try:
+                    daily_loss = self._sync_daily_loss(client, risk_manager)
+                    if not risk_manager.check_daily_loss():
+                        self.logger.warning("Daily loss cap reached", extra={"symbol": self.settings.symbol})
+                        self.alert_queue.enqueue(
+                            AlertSeverity.CRITICAL,
+                            "Daily loss cap reached",
+                            {"symbol": self.settings.symbol, "daily_loss": daily_loss},
                         )
-                        last_hourly = datetime.now(timezone.utc)
-                    continue
+                        self._record_risk_event(
+                            session_factory,
+                            bot_session_id,
+                            event_type="daily_loss_cap",
+                            severity="warning",
+                            reason="Daily loss cap reached",
+                        )
+                        time.sleep(60)
+                        continue
 
-                if time.time() - last_signal_ts < cooldown_s:
-                    time.sleep(1)
-                    continue
+                    position = client.get_open_position(self.settings.symbol)
+                    if position and position.quantity > 0:
+                        self.logger.info("Position open, waiting", extra={"symbol": self.settings.symbol})
+                        time.sleep(5)
+                        if (datetime.now(timezone.utc) - last_hourly) >= timedelta(minutes=55):
+                            self.alert_queue.enqueue(
+                                AlertSeverity.INFO,
+                                "Hourly position status",
+                                {
+                                    "symbol": self.settings.symbol,
+                                    "quantity": position.quantity,
+                                    "entry_price": position.entry_price,
+                                    "daily_loss": round(daily_loss, 2),
+                                },
+                            )
+                            last_hourly = datetime.now(timezone.utc)
+                        continue
 
-                df = client.get_klines(self.settings.symbol, self.settings.timeframe, limit=300)
-                df = strategy.compute_indicators(df)
-                raw = strategy.get_signal(df)
-                if raw is None:
-                    time.sleep(1)
-                    continue
+                    if time.time() - last_signal_ts < cooldown_s:
+                        time.sleep(1)
+                        continue
 
-                prev = df.iloc[-2]
-                atr = float(prev["atr"]) if not pd.isna(prev.get("atr")) else 0.0
-                result = risk_manager.validate_signal(
-                    raw.entry_price,
-                    raw.stop_price,
-                    raw.take_profit_price,
-                    raw.side,
-                    atr,
-                    None,
-                )
-                if not result.allowed or result.quantity <= 0:
-                    self.logger.info(
-                        "Signal rejected by risk manager",
-                        extra={"symbol": self.settings.symbol, "reason": result.reason},
+                    df = client.get_klines(self.settings.symbol, self.settings.timeframe, limit=300)
+                    df = strategy.compute_indicators(df)
+                    raw = strategy.get_signal(df)
+                    if raw is None:
+                        time.sleep(1)
+                        continue
+
+                    prev = df.iloc[-2]
+                    atr = float(prev["atr"]) if not pd.isna(prev.get("atr")) else 0.0
+                    result = risk_manager.validate_signal(
+                        raw.entry_price,
+                        raw.stop_price,
+                        raw.take_profit_price,
+                        raw.side,
+                        atr,
+                        None,
                     )
-                    self._record_risk_event(
+                    if not result.allowed or result.quantity <= 0:
+                        self.logger.info(
+                            "Signal rejected by risk manager",
+                            extra={"symbol": self.settings.symbol, "reason": result.reason},
+                        )
+                        self._record_risk_event(
+                            session_factory,
+                            bot_session_id,
+                            event_type="signal_rejected",
+                            reason=result.reason or "",
+                            payload={"side": raw.side.value, "entry_price": raw.entry_price},
+                        )
+                        time.sleep(1)
+                        continue
+
+                    signal = Signal(
+                        side=raw.side,
+                        entry_price=raw.entry_price,
+                        stop_price=raw.stop_price,
+                        take_profit_price=raw.take_profit_price,
+                        quantity=result.quantity,
+                        timestamp=raw.timestamp,
+                        metadata=raw.metadata,
+                    )
+                    order_result = client.place_market_and_sl_tp(self.settings.symbol, signal)
+                    reconciliation = reconciliation_worker.reconcile(
+                        symbol=self.settings.symbol,
+                        signal=signal,
+                        order_result=order_result,
+                    )
+                    _, order_id = self._record_live_signal(session_factory, bot_session_id, signal)
+                    self._record_order_result(session_factory, order_id, order_result)
+                    self._record_reconciliation_result(
                         session_factory,
                         bot_session_id,
-                        event_type="signal_rejected",
-                        reason=result.reason or "",
-                        payload={"side": raw.side.value, "entry_price": raw.entry_price},
+                        order_id,
+                        reconciliation,
                     )
+                    if order_result.success:
+                        last_signal_ts = time.time()
+                    if reconciliation.protected_order.protected:
+                        self.alert_queue.enqueue(
+                            AlertSeverity.INFO,
+                            "Protected entry accepted",
+                            {
+                                "symbol": self.settings.symbol,
+                                "side": raw.side.value,
+                                "quantity": result.quantity,
+                                "entry": order_result.avg_price or raw.entry_price,
+                            },
+                        )
                     time.sleep(1)
-                    continue
-
-                signal = Signal(
-                    side=raw.side,
-                    entry_price=raw.entry_price,
-                    stop_price=raw.stop_price,
-                    take_profit_price=raw.take_profit_price,
-                    quantity=result.quantity,
-                    timestamp=raw.timestamp,
-                    metadata=raw.metadata,
-                )
-                _, order_id = self._record_live_signal(session_factory, bot_session_id, signal)
-                order_result = client.place_market_and_sl_tp(self.settings.symbol, signal)
-                self._record_order_result(session_factory, order_id, order_result)
-                if order_result.success:
-                    last_signal_ts = time.time()
-                    send_telegram(
-                        (
-                            f"Entry {raw.side.value} {self.settings.symbol} qty={result.quantity} "
-                            f"entry={order_result.avg_price or raw.entry_price:.3f} "
-                            f"SL={raw.stop_price:.3f} TP={raw.take_profit_price:.3f}"
-                        ),
-                        self.settings.telegram_bot_token,
-                        self.settings.telegram_chat_id,
-                    )
-                time.sleep(1)
-            except KeyboardInterrupt:
-                self.logger.info("Shutdown by user")
-                send_telegram(
-                    "Trading bot stopped (user request).",
-                    self.settings.telegram_bot_token,
-                    self.settings.telegram_chat_id,
-                )
-                break
-            except Exception as exc:
-                self.logger.exception("Live loop error", extra={"error": str(exc)})
-                time.sleep(5)
-        self._finish_bot_session(session_factory, bot_session_id, status="stopped")
+                except KeyboardInterrupt:
+                    self.logger.info("Shutdown by user")
+                    self.alert_queue.enqueue(AlertSeverity.INFO, "Trading bot stopped by user")
+                    break
+                except Exception as exc:
+                    self.logger.exception("Live loop error", extra={"error": str(exc)})
+                    self.alert_queue.enqueue(AlertSeverity.CRITICAL, "Live loop error", {"error": str(exc)})
+                    time.sleep(5)
+        finally:
+            self._finish_bot_session(session_factory, bot_session_id, status="stopped")
+            self.alert_queue.stop(drain=True)
         return 0
 
-    def _create_client(self) -> BinanceFuturesClient:
+    def _create_client(self) -> ExecutionClient:
         if not self.settings.active_binance_api_key or not self.settings.active_binance_api_secret:
             raise RuntimeError("Missing active Binance API key or secret")
         return BinanceFuturesClient(
@@ -190,7 +217,7 @@ class LiveTrader:
             symbol_info=symbol_info,
         )
 
-    def _sync_daily_loss(self, client: BinanceFuturesClient, risk_manager: RiskManager) -> float:
+    def _sync_daily_loss(self, client: ExecutionClient, risk_manager: RiskManager) -> float:
         trades = client.fetch_recent_trades(self.settings.symbol, limit=500)
         now_date = datetime.now(timezone.utc).date()
         day_start_ts = int(datetime.combine(now_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() * 1000)
@@ -275,14 +302,41 @@ class LiveTrader:
             return
         try:
             with session_scope(session_factory) as session:
-                order = OrderRepository(session).apply_order_result(order_id, order_result)
-                if order_result.success:
-                    state_machine = OrderStateMachine.from_order(order)
-                    state_machine.mark_tp_placed()
-                    state_machine.mark_sl_placed()
-                    state_machine.apply_to(order)
+                OrderRepository(session).apply_order_result(order_id, order_result)
         except Exception as exc:
             self.logger.exception("Could not persist order result", extra={"error": str(exc)})
+
+    def _record_reconciliation_result(
+        self,
+        session_factory: SessionFactory,
+        bot_session_id: int | None,
+        order_id: int | None,
+        reconciliation: ReconciliationOutcome,
+    ) -> None:
+        try:
+            with session_scope(session_factory) as session:
+                if order_id is not None:
+                    OrderRepository(session).apply_protected_order_result(
+                        order_id,
+                        reconciliation.protected_order,
+                        emergency_close_order_id=reconciliation.emergency_close_order_id,
+                    )
+                risk_events = RiskEventRepository(session)
+                for event in reconciliation.events:
+                    payload = dict(event.payload)
+                    payload["attempts"] = reconciliation.attempts
+                    if order_id is not None:
+                        payload["order_id"] = order_id
+                    risk_events.create(
+                        symbol=self.settings.symbol,
+                        event_type=event.event_type,
+                        severity=event.severity,
+                        reason=event.reason,
+                        bot_session_id=bot_session_id,
+                        payload=payload,
+                    )
+        except Exception as exc:
+            self.logger.exception("Could not persist reconciliation result", extra={"error": str(exc)})
 
     def _record_risk_event(
         self,
