@@ -53,6 +53,33 @@ class BotSessionModel(Base):
     risk_events: Mapped[list[RiskEventModel]] = relationship(back_populates="bot_session")
 
 
+class ConfigModel(Base):
+    """Versioned API-managed configuration snapshot."""
+
+    __tablename__ = "configs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    is_active: Mapped[bool] = mapped_column(default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class RiskStateModel(Base):
+    """Persisted operator risk controls."""
+
+    __tablename__ = "risk_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kill_switch_enabled: Mapped[bool] = mapped_column(default=False, index=True)
+    manual_pause_enabled: Mapped[bool] = mapped_column(default=False, index=True)
+    daily_loss_locked: Mapped[bool] = mapped_column(default=False, index=True)
+    drawdown_locked: Mapped[bool] = mapped_column(default=False, index=True)
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class SignalModel(Base):
     """A strategy signal accepted for execution consideration."""
 

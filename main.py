@@ -4,6 +4,7 @@ Trading Bot CLI: backtest | live
 Usage:
   python main.py backtest [--config config.yaml]
   python main.py live [--config config.yaml]
+  python main.py api [--config config.yaml]
 """
 
 from __future__ import annotations
@@ -155,11 +156,20 @@ def run_live(config_path: Path | None) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Trading Bot CLI")
-    parser.add_argument("mode", choices=["backtest", "live"], help="Run backtest or live")
+    parser.add_argument("mode", choices=["backtest", "live", "api"], help="Run backtest, live, or api")
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
+    parser.add_argument("--host", default="127.0.0.1", help="API host")
+    parser.add_argument("--port", type=int, default=8000, help="API port")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
+    if args.mode == "api":
+        import uvicorn
+
+        settings = load_config(args.config, ROOT)
+        setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+        uvicorn.run("app.api.main:app", host=args.host, port=args.port, reload=False)
+        return 0
     return run_live(args.config)
 
 

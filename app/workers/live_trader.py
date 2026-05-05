@@ -11,7 +11,13 @@ import pandas as pd
 from app.core.config import Settings
 from app.core.security import assert_live_trading_allowed
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
-from app.persistence.repositories import BotSessionRepository, OrderRepository, RiskEventRepository, SignalRepository
+from app.persistence.repositories import (
+    BotSessionRepository,
+    OrderRepository,
+    RiskEventRepository,
+    RiskStateRepository,
+    SignalRepository,
+)
 from app.strategies.registry import StrategyRegistry, create_default_strategy_registry
 from app.workers.reconciliation import ReconciliationOutcome, ReconciliationWorker
 from trading_bot.core.types import Signal
@@ -89,6 +95,11 @@ class LiveTrader:
                             reason="Daily loss cap reached",
                         )
                         time.sleep(60)
+                        continue
+
+                    if self._risk_state_blocks_trading(session_factory):
+                        self.logger.warning("Trading paused by persisted risk state", extra={"symbol": self.settings.symbol})
+                        time.sleep(5)
                         continue
 
                     position = client.get_open_position(self.settings.symbol)
@@ -360,3 +371,24 @@ class LiveTrader:
                 )
         except Exception as exc:
             self.logger.exception("Could not persist risk event", extra={"error": str(exc)})
+
+    def _risk_state_blocks_trading(self, session_factory: SessionFactory) -> bool:
+        try:
+            with session_scope(session_factory) as session:
+                state = RiskStateRepository(session).get_or_create()
+                blocked = (
+                    state.kill_switch_enabled
+                    or state.manual_pause_enabled
+                    or state.daily_loss_locked
+                    or state.drawdown_locked
+                )
+                if blocked:
+                    self.alert_queue.enqueue(
+                        AlertSeverity.CRITICAL,
+                        "Trading paused by risk state",
+                        {"symbol": self.settings.symbol, "reason": state.reason},
+                    )
+                return blocked
+        except Exception as exc:
+            self.logger.exception("Could not read risk state", extra={"error": str(exc)})
+            return False

@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 from app.persistence.models import (
     BacktestRunModel,
     BotSessionModel,
+    ConfigModel,
     OrderLifecycleState,
     OrderModel,
     RiskEventModel,
+    RiskStateModel,
     SignalModel,
     TradeModel,
     utc_now,
@@ -48,6 +50,10 @@ class BotSessionRepository:
         self.session.add(model)
         self.session.flush()
         return model
+
+    def list_recent(self, *, limit: int = 100) -> list[BotSessionModel]:
+        statement = select(BotSessionModel).order_by(BotSessionModel.started_at.desc()).limit(limit)
+        return list(self.session.scalars(statement))
 
     def finish(self, bot_session_id: int, *, status: str) -> BotSessionModel:
         model = self.session.get(BotSessionModel, bot_session_id)
@@ -93,8 +99,11 @@ class SignalRepository:
         self.session.flush()
         return model
 
-    def list_recent(self, *, symbol: str, limit: int = 100) -> list[SignalModel]:
-        statement = select(SignalModel).where(SignalModel.symbol == symbol).order_by(SignalModel.timestamp.desc()).limit(limit)
+    def list_recent(self, *, symbol: str | None = None, limit: int = 100) -> list[SignalModel]:
+        statement = select(SignalModel)
+        if symbol is not None:
+            statement = statement.where(SignalModel.symbol == symbol)
+        statement = statement.order_by(SignalModel.timestamp.desc()).limit(limit)
         return list(self.session.scalars(statement))
 
 
@@ -257,8 +266,18 @@ class TradeRepository:
         self.session.flush()
         return model
 
-    def list_recent(self, *, symbol: str, limit: int = 100) -> list[TradeModel]:
-        statement = select(TradeModel).where(TradeModel.symbol == symbol).order_by(TradeModel.exit_time.desc()).limit(limit)
+    def get(self, trade_id: int) -> TradeModel | None:
+        return self.session.get(TradeModel, trade_id)
+
+    def list_recent(self, *, symbol: str | None = None, limit: int = 100) -> list[TradeModel]:
+        statement = select(TradeModel)
+        if symbol is not None:
+            statement = statement.where(TradeModel.symbol == symbol)
+        statement = statement.order_by(TradeModel.exit_time.desc()).limit(limit)
+        return list(self.session.scalars(statement))
+
+    def list_backtest_runs(self, *, limit: int = 100) -> list[BacktestRunModel]:
+        statement = select(BacktestRunModel).order_by(BacktestRunModel.created_at.desc()).limit(limit)
         return list(self.session.scalars(statement))
 
 
@@ -287,5 +306,54 @@ class RiskEventRepository:
             payload=payload or {},
         )
         self.session.add(model)
+        self.session.flush()
+        return model
+
+
+class ConfigRepository:
+    """Persistence operations for API-managed config snapshots."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_all(self) -> list[ConfigModel]:
+        statement = select(ConfigModel).order_by(ConfigModel.created_at.desc())
+        return list(self.session.scalars(statement))
+
+    def upsert(self, *, name: str, payload: dict[str, object], is_active: bool = False) -> ConfigModel:
+        model = self.session.scalar(select(ConfigModel).where(ConfigModel.name == name))
+        if model is None:
+            model = ConfigModel(name=name, payload=payload, is_active=is_active)
+            self.session.add(model)
+        else:
+            model.payload = payload
+            model.is_active = is_active
+            model.updated_at = utc_now()
+        if is_active:
+            for other in self.session.scalars(select(ConfigModel).where(ConfigModel.name != name)):
+                other.is_active = False
+        self.session.flush()
+        return model
+
+
+class RiskStateRepository:
+    """Persistence operations for operator risk controls."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get_or_create(self) -> RiskStateModel:
+        model = self.session.scalar(select(RiskStateModel).order_by(RiskStateModel.id.asc()))
+        if model is None:
+            model = RiskStateModel()
+            self.session.add(model)
+            self.session.flush()
+        return model
+
+    def set_kill_switch(self, *, enabled: bool, reason: str = "") -> RiskStateModel:
+        model = self.get_or_create()
+        model.kill_switch_enabled = enabled
+        model.reason = reason
+        model.updated_at = utc_now()
         self.session.flush()
         return model
