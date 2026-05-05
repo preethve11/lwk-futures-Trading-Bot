@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -18,9 +19,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.backtesting.data_loader import load_csv_ohlcv
+from app.core.config import Settings
+from app.persistence.database import create_session_factory, init_db, session_scope
+from app.persistence.repositories import TradeRepository
 from app.strategies.registry import create_default_strategy_registry
 from app.workers.live_trader import LiveTrader
-from trading_bot.backtesting.engine import BacktestEngine
+from trading_bot.backtesting.engine import BacktestEngine, BacktestRecorder, BacktestResult
 from trading_bot.core.config import load_config
 from trading_bot.core.logger import setup_logging
 from trading_bot.execution.binance_futures import BinanceFuturesClient
@@ -51,6 +55,7 @@ def run_backtest(config_path: Path | None) -> int:
         initial_capital=settings.backtest_initial_capital,
         slippage_bps=settings.slippage_bps,
         fee_bps=settings.fee_bps,
+        recorder=_create_backtest_recorder(settings),
     )
 
     if settings.historical_data_csv:
@@ -88,6 +93,57 @@ def run_backtest(config_path: Path | None) -> int:
         print(f"Profit factor: {metrics.profit_factor:.2f}")
         print(f"Expectancy: {metrics.expectancy:.2f} USD/trade")
     return 0
+
+
+def _create_backtest_recorder(settings: Settings) -> BacktestRecorder:
+    """Create a best-effort persistence recorder for backtest results."""
+    session_factory = create_session_factory(settings.database_url)
+    try:
+        init_db(session_factory)
+    except Exception as exc:
+        logging.getLogger("trading_bot").exception("Could not initialize persistence database", extra={"error": str(exc)})
+
+    def record(
+        result: BacktestResult,
+        symbol: str,
+        start_date: str | datetime | None,
+        end_date: str | datetime | None,
+    ) -> None:
+        if result.metrics is None:
+            return
+        try:
+            with session_scope(session_factory) as session:
+                repository = TradeRepository(session)
+                final_capital = result.equity_curve[-1] if result.equity_curve else settings.backtest_initial_capital
+                repository.create_backtest_run(
+                    strategy_name=settings.strategy_name,
+                    symbol=symbol,
+                    timeframe=settings.timeframe,
+                    initial_capital=settings.backtest_initial_capital,
+                    final_capital=final_capital,
+                    metrics=result.metrics,
+                    start_date=_coerce_datetime(start_date),
+                    end_date=_coerce_datetime(end_date),
+                    config_snapshot={
+                        "start_date": str(start_date) if start_date is not None else None,
+                        "end_date": str(end_date) if end_date is not None else None,
+                    },
+                )
+                for trade in result.trades:
+                    repository.create_from_trade(trade, source="backtest")
+        except Exception as exc:
+            logging.getLogger("trading_bot").exception("Could not persist backtest run", extra={"error": str(exc)})
+
+    return record
+
+
+def _coerce_datetime(value: str | datetime | None) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def run_live(config_path: Path | None) -> int:

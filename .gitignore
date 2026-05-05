@@ -18,6 +18,9 @@ env/
 logs/
 *.log
 trades_log.csv
+*.db
+*.db-shm
+*.db-wal
 
 # IDE
 .idea/
