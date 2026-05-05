@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.event_bus import LiveEventBus
 from app.api.routers import backtests, configs, positions, risk, sessions, signals, trades, ws
@@ -23,6 +24,14 @@ def create_app(
         init_db(factory)
 
     app = FastAPI(title="LWK Futures Trading Bot API", version="0.5.0")
+    if app_settings.api_cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=app_settings.api_cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     app.state.settings = app_settings
     app.state.session_factory = factory
     app.state.db_initialized = init_database

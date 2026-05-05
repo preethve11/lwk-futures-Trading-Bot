@@ -7,6 +7,7 @@ api:
 strategy:
   name: ema_rsi_vwap
   symbol: ZECUSDT
+  symbols: [ZECUSDT]
   timeframe: 5m
   ema_fast: 9
   ema_slow: 21
@@ -49,3 +50,6 @@ backtest:
   start_date: null
   end_date: null
   initial_capital: 10000.0
+  historical_data_csv: null
+  historical_data_dir: null
+  report_dir: reports/backtests

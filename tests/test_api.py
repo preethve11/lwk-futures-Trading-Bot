@@ -113,6 +113,22 @@ def test_api_rejects_invalid_token() -> None:
     assert response.status_code == 401
 
 
+def test_api_allows_configured_frontend_origin() -> None:
+    client, _ = _client()
+
+    response = client.options(
+        "/trades",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "X-API-Token",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
 def test_configs_create_and_list() -> None:
     client, _ = _client()
 
@@ -225,3 +241,37 @@ def test_backtest_run_endpoint_persists_result() -> None:
     body = response.json()
     assert body["backtest_run"]["symbol"] == "ZECUSDT"
     assert body["equity_curve"]
+
+
+def test_multi_symbol_backtest_run_endpoint_persists_aggregate() -> None:
+    client, _ = _client()
+    candles = [
+        {
+            "time": f"2026-01-01T00:{minute:02d}:00Z",
+            "open": 100 + minute,
+            "high": 103 + minute,
+            "low": 99 + minute,
+            "close": 100 + minute,
+            "volume": 1000,
+        }
+        for minute in range(36)
+    ]
+
+    response = client.post(
+        "/backtests/run-multi",
+        headers=_headers(),
+        json={
+            "symbols": ["ZECUSDT", "BTCUSDT"],
+            "timeframe": "5m",
+            "candles_by_symbol": {
+                "ZECUSDT": candles,
+                "BTCUSDT": candles,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["aggregate"]["symbol"] == "MULTI"
+    assert len(body["symbols"]) == 2
+    assert {symbol["symbol"] for symbol in body["symbols"]} == {"ZECUSDT", "BTCUSDT"}

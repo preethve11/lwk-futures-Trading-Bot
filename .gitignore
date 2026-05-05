@@ -16,6 +16,7 @@ env/
 
 # Logs and data
 logs/
+reports/
 *.log
 trades_log.csv
 *.db

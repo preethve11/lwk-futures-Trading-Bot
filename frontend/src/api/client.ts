@@ -4,6 +4,8 @@ import type {
   ConfigSnapshot,
   DashboardSnapshot,
   LiveEvent,
+  MultiBacktestRunRequest,
+  MultiBacktestRunResult,
   Position,
   RiskEvent,
   RiskState,
@@ -39,6 +41,11 @@ export const apiClient = {
   getPositions: () => request<Position[]>('/positions'),
   getRiskState: () => request<RiskState>('/risk/state'),
   getRiskEvents: () => request<RiskEvent[]>('/risk/events'),
+  runMultiBacktest: (payload: MultiBacktestRunRequest) =>
+    request<MultiBacktestRunResult>('/backtests/run-multi', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
   setKillSwitch: (enabled: boolean, reason: string) =>
     request<RiskState>('/risk/kill-switch', {
       method: 'POST',

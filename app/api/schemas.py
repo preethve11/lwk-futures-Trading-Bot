@@ -75,6 +75,31 @@ class BacktestRunResult(BaseModel):
     equity_curve: list[float]
 
 
+class MultiBacktestRunRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list)
+    timeframe: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    candles_by_symbol: dict[str, list[CandleInput]] = Field(default_factory=dict)
+
+
+class BacktestReportResponse(BaseModel):
+    symbol: str
+    timeframe: str
+    initial_capital: float
+    final_capital: float
+    total_pnl: float
+    total_trades: int
+    run_id: str | None = None
+    metrics: dict[str, Any]
+    equity_curve: list[float]
+
+
+class MultiBacktestRunResult(BaseModel):
+    aggregate: BacktestReportResponse
+    symbols: list[BacktestReportResponse]
+
+
 class TradeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

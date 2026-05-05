@@ -29,6 +29,40 @@ export interface BacktestRun {
   created_at: string;
 }
 
+export interface CandleInput {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface MultiBacktestRunRequest {
+  symbols: string[];
+  timeframe?: string;
+  start_date?: string;
+  end_date?: string;
+  candles_by_symbol: Record<string, CandleInput[]>;
+}
+
+export interface BacktestReport {
+  symbol: string;
+  timeframe: string;
+  initial_capital: number;
+  final_capital: number;
+  total_pnl: number;
+  total_trades: number;
+  run_id: string | null;
+  metrics: Record<string, number | null>;
+  equity_curve: number[];
+}
+
+export interface MultiBacktestRunResult {
+  aggregate: BacktestReport;
+  symbols: BacktestReport[];
+}
+
 export interface Trade {
   id: number;
   bot_session_id: number | null;

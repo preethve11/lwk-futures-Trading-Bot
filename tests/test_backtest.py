@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from app.backtesting.data_loader import BinanceHistoricalDataLoader, load_csv_ohlcv
+from app.backtesting.multi_symbol import BacktestReportExporter, MultiSymbolBacktestRunner
+from app.core.config import Settings
+from app.persistence.database import create_session_factory, init_db, session_scope
+from app.persistence.repositories import TradeRepository
 from trading_bot.backtesting.engine import BacktestEngine
 from trading_bot.core.types import Signal, SignalSide
 from trading_bot.risk.manager import RiskManager
@@ -132,3 +137,28 @@ def test_binance_historical_loader_normalizes_raw_klines() -> None:
     assert loaded.iloc[0]["open"] == 100.0
     assert loaded.iloc[1]["close"] == 102.0
     assert str(loaded.iloc[0]["time"].tzinfo) == "UTC"
+
+
+def test_multi_symbol_backtest_persists_symbol_and_aggregate_runs(tmp_path: Path) -> None:
+    settings = Settings(database_url="sqlite:///:memory:", symbols=["ZECUSDT", "BTCUSDT"])
+    factory = create_session_factory(settings.database_url)
+    init_db(factory)
+
+    with session_scope(factory) as session:
+        report = MultiSymbolBacktestRunner(settings, session).run(
+            {
+                "ZECUSDT": _market_data(36),
+                "BTCUSDT": _market_data(36),
+            }
+        )
+        runs = TradeRepository(session).list_backtest_runs(limit=10)
+
+    json_path = BacktestReportExporter.write_json(report, tmp_path / "report.json")
+    html_path = BacktestReportExporter.write_html(report, tmp_path / "report.html")
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert report.aggregate.symbol == "MULTI"
+    assert len(report.symbols) == 2
+    assert {run.symbol for run in runs} == {"ZECUSDT", "BTCUSDT", "MULTI"}
+    assert payload["aggregate"]["metrics"]["avg_r_r"] is None
+    assert "LWK Futures Backtest Report" in html_path.read_text(encoding="utf-8")

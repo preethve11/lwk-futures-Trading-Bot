@@ -79,10 +79,20 @@ class Settings(BaseSettings):
     backtest_end: str | None = None
     backtest_initial_capital: float = Field(default=10000.0, gt=0)
     historical_data_csv: Path | None = None
+    historical_data_dir: Path | None = None
+    backtest_report_dir: Path = Path("reports/backtests")
 
     database_url: str = "sqlite:///./trading_bot.db"
     redis_url: str = "redis://localhost:6379/0"
     api_token: str = ""
+    api_cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+        ]
+    )
     openai_api_key: str = ""
 
     @field_validator("symbol", mode="before")
@@ -96,6 +106,13 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip().upper() for item in value.split(",") if item.strip()]
         return [item.strip().upper() for item in value]
+
+    @field_validator("api_cors_origins", mode="before")
+    @classmethod
+    def normalize_cors_origins(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [item.strip() for item in value]
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -160,6 +177,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "use_testnet": api.get("use_testnet"),
         "strategy_name": strategy.get("name") or strategy.get("strategy_name"),
         "symbol": strategy.get("symbol"),
+        "symbols": strategy.get("symbols"),
         "timeframe": strategy.get("timeframe"),
         "ema_fast": strategy.get("ema_fast"),
         "ema_slow": strategy.get("ema_slow"),
@@ -191,5 +209,8 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "backtest_start": backtest.get("start_date"),
         "backtest_end": backtest.get("end_date"),
         "backtest_initial_capital": backtest.get("initial_capital"),
+        "historical_data_csv": backtest.get("historical_data_csv"),
+        "historical_data_dir": backtest.get("historical_data_dir"),
+        "backtest_report_dir": backtest.get("report_dir"),
     }
     return {key: value for key, value in values.items() if value is not None}

@@ -7,7 +7,8 @@ from datetime import datetime
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.api.schemas import BacktestRunRequest
+from app.api.schemas import BacktestRunRequest, MultiBacktestRunRequest
+from app.backtesting.multi_symbol import MultiSymbolBacktestReport, MultiSymbolBacktestRunner
 from app.core.config import Settings
 from app.persistence.models import BacktestRunModel, BotSessionModel, RiskStateModel
 from app.persistence.repositories import BotSessionRepository, RiskStateRepository, TradeRepository
@@ -117,6 +118,28 @@ class BacktestService:
         for trade in result.trades:
             TradeRepository(self.session).create_from_trade(trade, source="backtest")
         return run_model, result
+
+    def run_multi(self, request: MultiBacktestRunRequest) -> MultiSymbolBacktestReport:
+        if not request.candles_by_symbol:
+            raise ValueError("Multi-symbol API backtest run requires candles_by_symbol")
+
+        requested_symbols = [symbol.strip().upper() for symbol in request.symbols if symbol.strip()]
+        datasets = {
+            symbol.strip().upper(): pd.DataFrame([candle.model_dump() for candle in candles])
+            for symbol, candles in request.candles_by_symbol.items()
+        }
+        if requested_symbols:
+            missing = [symbol for symbol in requested_symbols if symbol not in datasets]
+            if missing:
+                raise ValueError(f"Missing candle data for symbols: {', '.join(missing)}")
+            datasets = {symbol: datasets[symbol] for symbol in requested_symbols}
+
+        return MultiSymbolBacktestRunner(self.settings, self.session).run(
+            datasets,
+            timeframe=request.timeframe,
+            start_date=request.start_date,
+            end_date=request.end_date,
+        )
 
 
 def _coerce_datetime(value: str | datetime | None) -> datetime | None:

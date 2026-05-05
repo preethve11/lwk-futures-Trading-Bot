@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_app_settings, get_db, require_api_token
-from app.api.schemas import BacktestRunRequest, BacktestRunResponse, BacktestRunResult
+from app.api.schemas import BacktestRunRequest, BacktestRunResponse, BacktestRunResult, MultiBacktestRunRequest, MultiBacktestRunResult
 from app.api.services import BacktestService
 from app.core.config import Settings
 from app.persistence.models import BacktestRunModel
@@ -33,3 +33,19 @@ def run_backtest(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return {"backtest_run": run_model, "equity_curve": result.equity_curve}
+
+
+@router.post("/run-multi", response_model=MultiBacktestRunResult)
+def run_multi_backtest(
+    request: MultiBacktestRunRequest,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> dict[str, object]:
+    try:
+        report = BacktestService(db, settings).run_multi(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "aggregate": report.aggregate.to_dict(),
+        "symbols": [symbol_report.to_dict() for symbol_report in report.symbols],
+    }
