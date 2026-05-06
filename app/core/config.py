@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     walk_forward_objective: Literal["sharpe", "sortino", "total_return", "profit_factor", "win_rate"] = "sharpe"
     walk_forward_random_seed: int = 42
     walk_forward_report_dir: Path = Path("reports/optimizations")
+    monte_carlo_simulations: int = Field(default=1000, gt=0)
+    monte_carlo_horizon_trades: int = Field(default=100, gt=0)
+    monte_carlo_ruin_drawdown_pct: float = Field(default=30.0, ge=0, le=100)
+    monte_carlo_random_seed: int = 42
+    monte_carlo_report_dir: Path = Path("reports/monte_carlo")
 
     database_url: str = "sqlite:///./trading_bot.db"
     redis_url: str = "redis://localhost:6379/0"
@@ -186,6 +191,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
     backtest = data.get("backtest", {})
     optimization = data.get("optimization", {})
     walk_forward = optimization.get("walk_forward", {})
+    monte_carlo = optimization.get("monte_carlo", {})
     market_data = data.get("market_data", {})
 
     values: dict[str, Any] = {
@@ -235,6 +241,11 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "walk_forward_objective": walk_forward.get("objective"),
         "walk_forward_random_seed": walk_forward.get("random_seed"),
         "walk_forward_report_dir": walk_forward.get("report_dir"),
+        "monte_carlo_simulations": monte_carlo.get("simulations"),
+        "monte_carlo_horizon_trades": monte_carlo.get("horizon_trades"),
+        "monte_carlo_ruin_drawdown_pct": monte_carlo.get("ruin_drawdown_pct"),
+        "monte_carlo_random_seed": monte_carlo.get("random_seed"),
+        "monte_carlo_report_dir": monte_carlo.get("report_dir"),
         "market_data_source": market_data.get("source"),
         "market_data_channel": market_data.get("channel"),
         "market_data_history_size": market_data.get("history_size"),

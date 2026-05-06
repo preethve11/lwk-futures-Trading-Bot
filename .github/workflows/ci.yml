@@ -51,6 +51,16 @@ jobs:
       - name: Market data CLI smoke
         run: python main.py market-data --max-messages 0
 
+      - name: Monte Carlo CLI smoke
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("pytest_tmp").mkdir(exist_ok=True)
+          Path("pytest_tmp/monte_carlo_input.json").write_text(json.dumps({"pnls": [10.0, -5.0, 7.5]}), encoding="utf-8")
+          PY
+          python main.py monte-carlo --returns-json pytest_tmp/monte_carlo_input.json --report-json pytest_tmp/monte_carlo_report.json --simulations 10 --horizon-trades 5
+
       - name: Frontend install
         working-directory: frontend
         run: npm ci
