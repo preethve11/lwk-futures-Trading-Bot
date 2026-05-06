@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.persistence.models import (
+    AIReportModel,
     BacktestRunModel,
     BotSessionModel,
     ConfigModel,
@@ -315,6 +316,66 @@ class RiskEventRepository:
         if symbol is not None:
             statement = statement.where(RiskEventModel.symbol == symbol)
         statement = statement.order_by(RiskEventModel.created_at.desc()).limit(limit)
+        return list(self.session.scalars(statement))
+
+
+class AIReportRepository:
+    """Persistence operations for advisory AI trade journal reports."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        symbol: str,
+        strategy_name: str,
+        event_type: str,
+        model: str,
+        prompt: str,
+        report_text: str,
+        input_snapshot: dict[str, object],
+        risk_state: dict[str, object],
+        market_regime: dict[str, object],
+        outcome: dict[str, object],
+        raw_response: dict[str, object] | None = None,
+        bot_session_id: int | None = None,
+        signal_id: int | None = None,
+        trade_id: int | None = None,
+    ) -> AIReportModel:
+        report = AIReportModel(
+            bot_session_id=bot_session_id,
+            signal_id=signal_id,
+            trade_id=trade_id,
+            symbol=symbol,
+            strategy_name=strategy_name,
+            event_type=event_type,
+            model=model,
+            prompt=prompt,
+            report_text=report_text,
+            input_snapshot=input_snapshot,
+            risk_state=risk_state,
+            market_regime=market_regime,
+            outcome=outcome,
+            raw_response=raw_response or {},
+        )
+        self.session.add(report)
+        self.session.flush()
+        return report
+
+    def list_recent(
+        self,
+        *,
+        symbol: str | None = None,
+        event_type: str | None = None,
+        limit: int = 100,
+    ) -> list[AIReportModel]:
+        statement = select(AIReportModel)
+        if symbol is not None:
+            statement = statement.where(AIReportModel.symbol == symbol)
+        if event_type is not None:
+            statement = statement.where(AIReportModel.event_type == event_type)
+        statement = statement.order_by(AIReportModel.created_at.desc()).limit(limit)
         return list(self.session.scalars(statement))
 
 

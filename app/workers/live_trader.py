@@ -8,9 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
+from app.ai.journal import AIJournalQueue, AIJournalRequest, AIJournalService, OpenAIResponsesJournalClient
 from app.core.config import Settings
-from app.market_data.provider import MarketDataProvider, RedisMarketDataProvider
 from app.core.security import assert_live_trading_allowed
+from app.market_data.provider import MarketDataProvider, RedisMarketDataProvider
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
 from app.persistence.repositories import (
     BotSessionRepository,
@@ -41,12 +42,14 @@ class LiveTrader:
         session_factory: SessionFactory | None = None,
         alert_queue: AlertQueue | None = None,
         market_data_provider: MarketDataProvider | None = None,
+        ai_journal_queue: AIJournalQueue | None = None,
     ) -> None:
         self.settings = settings
         self.strategy_registry = strategy_registry or create_default_strategy_registry()
         self.client = client
         self.session_factory = session_factory
         self.market_data_provider = market_data_provider
+        self.ai_journal_queue = ai_journal_queue
         self.alert_queue = alert_queue or AlertQueue(
             bot_token=settings.telegram_bot_token,
             chat_id=settings.telegram_chat_id,
@@ -63,6 +66,7 @@ class LiveTrader:
         risk_manager = self._create_risk_manager(symbol_info)
         strategy = self.strategy_registry.create(self.settings.strategy_name, self.settings)
         session_factory = self._create_runtime_session_factory()
+        ai_journal_queue = self.ai_journal_queue or self._create_ai_journal_queue(session_factory)
         bot_session_id = self._start_bot_session(session_factory)
         reconciliation_worker = ReconciliationWorker(client, self.alert_queue)
         cooldown_s = timeframe_minutes(self.settings.timeframe) * 60
@@ -156,6 +160,18 @@ class LiveTrader:
                             reason=result.reason or "",
                             payload={"side": raw.side.value, "entry_price": raw.entry_price},
                         )
+                        ai_journal_queue.enqueue(
+                            AIJournalRequest(
+                                bot_session_id=bot_session_id,
+                                symbol=self.settings.symbol,
+                                strategy_name=self.settings.strategy_name,
+                                event_type="signal_rejected",
+                                input_snapshot=self._signal_snapshot(raw),
+                                risk_state={"allowed": result.allowed, "reason": result.reason or ""},
+                                market_regime=self._market_regime_snapshot(prev),
+                                outcome={"status": "rejected"},
+                            )
+                        )
                         time.sleep(1)
                         continue
 
@@ -174,13 +190,31 @@ class LiveTrader:
                         signal=signal,
                         order_result=order_result,
                     )
-                    _, order_id = self._record_live_signal(session_factory, bot_session_id, signal)
+                    signal_id, order_id = self._record_live_signal(session_factory, bot_session_id, signal)
                     self._record_order_result(session_factory, order_id, order_result)
                     self._record_reconciliation_result(
                         session_factory,
                         bot_session_id,
                         order_id,
                         reconciliation,
+                    )
+                    ai_journal_queue.enqueue(
+                        AIJournalRequest(
+                            bot_session_id=bot_session_id,
+                            signal_id=signal_id,
+                            symbol=self.settings.symbol,
+                            strategy_name=self.settings.strategy_name,
+                            event_type="signal_taken",
+                            input_snapshot=self._signal_snapshot(signal),
+                            risk_state={"allowed": result.allowed, "quantity": result.quantity},
+                            market_regime=self._market_regime_snapshot(prev),
+                            outcome={
+                                "order_success": order_result.success,
+                                "protected": reconciliation.protected_order.protected,
+                                "requires_manual_review": reconciliation.protected_order.requires_manual_review,
+                                "message": order_result.message,
+                            },
+                        )
                     )
                     if order_result.success:
                         last_signal_ts = time.time()
@@ -206,6 +240,7 @@ class LiveTrader:
                     time.sleep(5)
         finally:
             self._finish_bot_session(session_factory, bot_session_id, status="stopped")
+            ai_journal_queue.stop(drain=False)
             self.alert_queue.stop(drain=True)
         return 0
 
@@ -271,6 +306,21 @@ class LiveTrader:
         except Exception as exc:
             self.logger.exception("Could not initialize persistence database", extra={"error": str(exc)})
         return session_factory
+
+    def _create_ai_journal_queue(self, session_factory: SessionFactory) -> AIJournalQueue:
+        if not self.settings.ai_journal_enabled or not self.settings.openai_api_key:
+            return AIJournalQueue(None, enabled=False)
+        client = OpenAIResponsesJournalClient(
+            api_key=self.settings.openai_api_key,
+            model=self.settings.ai_journal_model,
+            base_url=self.settings.openai_base_url,
+            timeout_seconds=self.settings.ai_journal_timeout_seconds,
+        )
+        return AIJournalQueue(
+            AIJournalService(session_factory, client),
+            enabled=True,
+            maxsize=self.settings.ai_journal_max_queue_size,
+        )
 
     def _start_bot_session(self, session_factory: SessionFactory) -> int | None:
         try:
@@ -415,3 +465,30 @@ class LiveTrader:
         except Exception as exc:
             self.logger.exception("Could not read risk state", extra={"error": str(exc)})
             return False
+
+    def _signal_snapshot(self, signal: Signal) -> dict[str, object]:
+        return {
+            "side": signal.side.value,
+            "entry_price": signal.entry_price,
+            "stop_price": signal.stop_price,
+            "take_profit_price": signal.take_profit_price,
+            "quantity": signal.quantity,
+            "timestamp": signal.timestamp.isoformat(),
+            "metadata": dict(signal.metadata),
+        }
+
+    def _market_regime_snapshot(self, row: pd.Series) -> dict[str, object]:
+        snapshot: dict[str, object] = {}
+        for key in ["close", "vwap", "ema_fast", "ema_slow", "rsi", "atr", "volume", "vol_ma"]:
+            value = row.get(key)
+            if value is not None and not pd.isna(value):
+                snapshot[key] = float(value)
+        ema_fast = snapshot.get("ema_fast")
+        ema_slow = snapshot.get("ema_slow")
+        close = snapshot.get("close")
+        vwap = snapshot.get("vwap")
+        if isinstance(ema_fast, float) and isinstance(ema_slow, float):
+            snapshot["ema_trend"] = "bullish" if ema_fast > ema_slow else "bearish" if ema_fast < ema_slow else "flat"
+        if isinstance(close, float) and isinstance(vwap, float):
+            snapshot["vwap_position"] = "above" if close > vwap else "below" if close < vwap else "at"
+        return snapshot

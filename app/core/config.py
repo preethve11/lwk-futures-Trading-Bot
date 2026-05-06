@@ -111,6 +111,11 @@ class Settings(BaseSettings):
         ]
     )
     openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    ai_journal_enabled: bool = False
+    ai_journal_model: str = "gpt-4.1-mini"
+    ai_journal_timeout_seconds: float = Field(default=15.0, gt=0)
+    ai_journal_max_queue_size: int = Field(default=1000, gt=0)
 
     @field_validator("symbol", mode="before")
     @classmethod
@@ -193,6 +198,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
     walk_forward = optimization.get("walk_forward", {})
     monte_carlo = optimization.get("monte_carlo", {})
     market_data = data.get("market_data", {})
+    ai_journal = data.get("ai_journal", {})
 
     values: dict[str, Any] = {
         "use_testnet": api.get("use_testnet"),
@@ -250,5 +256,9 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "market_data_channel": market_data.get("channel"),
         "market_data_history_size": market_data.get("history_size"),
         "market_data_reconnect_backoff_seconds": market_data.get("reconnect_backoff_seconds"),
+        "ai_journal_enabled": ai_journal.get("enabled"),
+        "ai_journal_model": ai_journal.get("model"),
+        "ai_journal_timeout_seconds": ai_journal.get("timeout_seconds"),
+        "ai_journal_max_queue_size": ai_journal.get("max_queue_size"),
     }
     return {key: value for key, value in values.items() if value is not None}

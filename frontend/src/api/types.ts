@@ -149,6 +149,25 @@ export interface RiskEvent {
   created_at: string;
 }
 
+export interface AIReport {
+  id: number;
+  bot_session_id: number | null;
+  signal_id: number | null;
+  trade_id: number | null;
+  symbol: string;
+  strategy_name: string;
+  event_type: string;
+  model: string;
+  prompt: string;
+  report_text: string;
+  input_snapshot: Record<string, unknown>;
+  risk_state: Record<string, unknown>;
+  market_regime: Record<string, unknown>;
+  outcome: Record<string, unknown>;
+  raw_response: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface LiveEvent {
   event_type: string;
   payload: Record<string, unknown>;
@@ -163,6 +182,7 @@ export interface DashboardSnapshot {
   positions: Position[];
   riskState: RiskState | null;
   riskEvents: RiskEvent[];
+  aiReports: AIReport[];
 }
 
 export interface RiskStateUpdate {

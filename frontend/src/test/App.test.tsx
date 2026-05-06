@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../App';
 
-const emptyArrayEndpoints = ['/configs', '/backtests', '/trades', '/signals', '/sessions', '/positions', '/risk/events'];
+const emptyArrayEndpoints = ['/configs', '/backtests', '/trades', '/signals', '/ai-reports', '/sessions', '/positions', '/risk/events'];
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];

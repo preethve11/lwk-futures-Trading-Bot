@@ -207,6 +207,27 @@ class RiskEventResponse(BaseModel):
     created_at: datetime
 
 
+class AIReportResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bot_session_id: int | None
+    signal_id: int | None
+    trade_id: int | None
+    symbol: str
+    strategy_name: str
+    event_type: str
+    model: str
+    prompt: str
+    report_text: str
+    input_snapshot: dict[str, Any]
+    risk_state: dict[str, Any]
+    market_regime: dict[str, Any]
+    outcome: dict[str, Any]
+    raw_response: dict[str, Any]
+    created_at: datetime
+
+
 class PositionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
