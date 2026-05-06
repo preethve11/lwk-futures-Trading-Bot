@@ -4,6 +4,7 @@ All notable changes are tracked here.
 
 ## Unreleased
 
+- Add one-shot `recover-unprotected` command for persisted `FAILED_UNPROTECTED` orders with protection recheck, emergency close, alerts, and audit events.
 - Add exchange-fill reconciliation ledger, idempotent closed-PnL trade creation, API visibility, metrics, and migration.
 - Add Alembic migration foundation and database migration CLI commands.
 - Add GitHub/portfolio documentation polish.
