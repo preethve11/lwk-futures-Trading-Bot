@@ -11,7 +11,19 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.api.event_bus import LiveEventBus
-from app.api.routers import ai_reports, backtests, configs, monitoring, positions, risk, sessions, signals, trades, ws
+from app.api.routers import (
+    ai_reports,
+    backtests,
+    configs,
+    exchange_fills,
+    monitoring,
+    positions,
+    risk,
+    sessions,
+    signals,
+    trades,
+    ws,
+)
 from app.api.schemas import HealthResponse
 from app.core.config import Settings, get_settings
 from app.monitoring.metrics import AppMetrics
@@ -71,6 +83,7 @@ def create_app(
     app.include_router(monitoring.router)
     app.include_router(configs.router)
     app.include_router(ai_reports.router)
+    app.include_router(exchange_fills.router)
     app.include_router(backtests.router)
     app.include_router(trades.router)
     app.include_router(positions.router)

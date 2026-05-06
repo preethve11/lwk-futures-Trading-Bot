@@ -125,6 +125,32 @@ class TradeResponse(BaseModel):
     fees: float
     slippage_usd: float
     source: str
+    exchange_trade_id: str | None
+    exchange_order_id: str | None
+    created_at: datetime
+
+
+class ExchangeFillResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bot_session_id: int | None
+    trade_id: int | None
+    symbol: str
+    exchange_trade_id: str
+    exchange_order_id: str
+    side: str
+    position_side: str
+    price: float
+    quantity: float
+    quote_quantity: float
+    realized_pnl: float
+    commission: float
+    commission_asset: str
+    buyer: bool
+    maker: bool
+    event_time: datetime
+    raw_payload: dict[str, Any]
     created_at: datetime
 
 

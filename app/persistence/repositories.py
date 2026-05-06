@@ -13,6 +13,7 @@ from app.persistence.models import (
     BacktestRunModel,
     BotSessionModel,
     ConfigModel,
+    ExchangeFillModel,
     OrderLifecycleState,
     OrderModel,
     PositionModel,
@@ -22,6 +23,7 @@ from app.persistence.models import (
     TradeModel,
     utc_now,
 )
+from app.exchange.fills import ExchangeFill
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Signal, Trade
 from trading_bot.execution.base import OrderResult, ProtectedOrderResult
@@ -233,6 +235,46 @@ class TradeRepository:
         self.session.flush()
         return model
 
+    def get_by_exchange_trade_id(self, exchange_trade_id: str) -> TradeModel | None:
+        statement = select(TradeModel).where(TradeModel.exchange_trade_id == exchange_trade_id)
+        return self.session.scalar(statement)
+
+    def create_from_exchange_fill(
+        self,
+        fill: ExchangeFill,
+        *,
+        bot_session_id: int | None = None,
+        order_id: int | None = None,
+    ) -> tuple[TradeModel | None, bool]:
+        """Create an idempotent closed-PnL trade from a Binance realized-PnL fill."""
+        if not fill.is_closing_fill:
+            return None, False
+        existing = self.get_by_exchange_trade_id(fill.exchange_trade_id)
+        if existing is not None:
+            return existing, False
+
+        model = TradeModel(
+            bot_session_id=bot_session_id,
+            order_id=order_id,
+            symbol=fill.symbol,
+            side=fill.inferred_position_side,
+            quantity=fill.quantity,
+            entry_price=fill.inferred_entry_price,
+            exit_price=fill.price,
+            pnl=fill.realized_pnl,
+            pnl_pct=fill.inferred_pnl_pct,
+            entry_time=fill.event_time,
+            exit_time=fill.event_time,
+            exit_reason="exchange_fill",
+            fees=fill.commission,
+            source="exchange_reconciliation",
+            exchange_trade_id=fill.exchange_trade_id,
+            exchange_order_id=fill.exchange_order_id,
+        )
+        self.session.add(model)
+        self.session.flush()
+        return model, True
+
     def create_backtest_run(
         self,
         *,
@@ -316,6 +358,56 @@ class RiskEventRepository:
         if symbol is not None:
             statement = statement.where(RiskEventModel.symbol == symbol)
         statement = statement.order_by(RiskEventModel.created_at.desc()).limit(limit)
+        return list(self.session.scalars(statement))
+
+
+class ExchangeFillRepository:
+    """Persistence operations for raw exchange fills."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get_by_exchange_trade_id(self, exchange_trade_id: str) -> ExchangeFillModel | None:
+        statement = select(ExchangeFillModel).where(ExchangeFillModel.exchange_trade_id == exchange_trade_id)
+        return self.session.scalar(statement)
+
+    def create_from_fill(
+        self,
+        fill: ExchangeFill,
+        *,
+        bot_session_id: int | None = None,
+    ) -> tuple[ExchangeFillModel, bool]:
+        existing = self.get_by_exchange_trade_id(fill.exchange_trade_id)
+        if existing is not None:
+            return existing, False
+
+        model = ExchangeFillModel(
+            bot_session_id=bot_session_id,
+            symbol=fill.symbol,
+            exchange_trade_id=fill.exchange_trade_id,
+            exchange_order_id=fill.exchange_order_id,
+            side=fill.side,
+            position_side=fill.position_side,
+            price=fill.price,
+            quantity=fill.quantity,
+            quote_quantity=fill.quote_quantity,
+            realized_pnl=fill.realized_pnl,
+            commission=fill.commission,
+            commission_asset=fill.commission_asset,
+            buyer=fill.buyer,
+            maker=fill.maker,
+            event_time=fill.event_time,
+            raw_payload=fill.raw_payload,
+        )
+        self.session.add(model)
+        self.session.flush()
+        return model, True
+
+    def list_recent(self, *, symbol: str | None = None, limit: int = 100) -> list[ExchangeFillModel]:
+        statement = select(ExchangeFillModel)
+        if symbol is not None:
+            statement = statement.where(ExchangeFillModel.symbol == symbol)
+        statement = statement.order_by(ExchangeFillModel.event_time.desc()).limit(limit)
         return list(self.session.scalars(statement))
 
 

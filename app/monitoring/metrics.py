@@ -14,6 +14,7 @@ from app.persistence.models import (
     AIReportModel,
     BacktestRunModel,
     BotSessionModel,
+    ExchangeFillModel,
     OrderLifecycleState,
     OrderModel,
     PositionModel,
@@ -162,6 +163,7 @@ class AppMetrics:
                 self._set_record_count("risk_events", session.scalar(select(func.count(RiskEventModel.id))) or 0)
                 self._set_record_count("backtest_runs", session.scalar(select(func.count(BacktestRunModel.id))) or 0)
                 self._set_record_count("ai_reports", session.scalar(select(func.count(AIReportModel.id))) or 0)
+                self._set_record_count("exchange_fills", session.scalar(select(func.count(ExchangeFillModel.id))) or 0)
         except SQLAlchemyError as exc:
             self._db_readiness.set(0)
             return ReadinessCheck(status="degraded", details={"database": str(exc)})

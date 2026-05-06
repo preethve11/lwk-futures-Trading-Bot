@@ -52,6 +52,7 @@ class BotSessionModel(Base):
     positions: Mapped[list[PositionModel]] = relationship(back_populates="bot_session")
     risk_events: Mapped[list[RiskEventModel]] = relationship(back_populates="bot_session")
     ai_reports: Mapped[list[AIReportModel]] = relationship(back_populates="bot_session")
+    exchange_fills: Mapped[list[ExchangeFillModel]] = relationship(back_populates="bot_session")
 
 
 class ConfigModel(Base):
@@ -169,7 +170,11 @@ class TradeModel(Base):
     """Closed trade event for live trading or backtests."""
 
     __tablename__ = "trades"
-    __table_args__ = (Index("ix_trades_symbol_exit_time", "symbol", "exit_time"),)
+    __table_args__ = (
+        UniqueConstraint("exchange_trade_id", name="uq_trades_exchange_trade_id"),
+        Index("ix_trades_symbol_exit_time", "symbol", "exit_time"),
+        Index("ix_trades_exchange_order_id", "exchange_order_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     bot_session_id: Mapped[int | None] = mapped_column(ForeignKey("bot_sessions.id"), nullable=True, index=True)
@@ -188,12 +193,49 @@ class TradeModel(Base):
     fees: Mapped[float] = mapped_column(default=0.0)
     slippage_usd: Mapped[float] = mapped_column(default=0.0)
     source: Mapped[str] = mapped_column(String(32), default="live", index=True)
+    exchange_trade_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    exchange_order_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     bot_session: Mapped[BotSessionModel | None] = relationship(back_populates="trades")
     signal: Mapped[SignalModel | None] = relationship(back_populates="trades")
     order: Mapped[OrderModel | None] = relationship(back_populates="trades")
     ai_reports: Mapped[list[AIReportModel]] = relationship(back_populates="trade")
+    exchange_fills: Mapped[list[ExchangeFillModel]] = relationship(back_populates="trade")
+
+
+class ExchangeFillModel(Base):
+    """Raw exchange fill ledger for idempotent Binance account-trade reconciliation."""
+
+    __tablename__ = "exchange_fills"
+    __table_args__ = (
+        UniqueConstraint("exchange_trade_id", name="uq_exchange_fills_exchange_trade_id"),
+        Index("ix_exchange_fills_symbol_event_time", "symbol", "event_time"),
+        Index("ix_exchange_fills_exchange_order_id", "exchange_order_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bot_session_id: Mapped[int | None] = mapped_column(ForeignKey("bot_sessions.id"), nullable=True, index=True)
+    trade_id: Mapped[int | None] = mapped_column(ForeignKey("trades.id"), nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    exchange_trade_id: Mapped[str] = mapped_column(String(120))
+    exchange_order_id: Mapped[str] = mapped_column(String(120), default="")
+    side: Mapped[str] = mapped_column(String(12), index=True)
+    position_side: Mapped[str] = mapped_column(String(16), default="")
+    price: Mapped[float]
+    quantity: Mapped[float]
+    quote_quantity: Mapped[float] = mapped_column(default=0.0)
+    realized_pnl: Mapped[float] = mapped_column(default=0.0)
+    commission: Mapped[float] = mapped_column(default=0.0)
+    commission_asset: Mapped[str] = mapped_column(String(24), default="")
+    buyer: Mapped[bool] = mapped_column(default=False)
+    maker: Mapped[bool] = mapped_column(default=False)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    raw_payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    bot_session: Mapped[BotSessionModel | None] = relationship(back_populates="exchange_fills")
+    trade: Mapped[TradeModel | None] = relationship(back_populates="exchange_fills")
 
 
 class RiskEventModel(Base):

@@ -4,6 +4,7 @@ All notable changes are tracked here.
 
 ## Unreleased
 
+- Add exchange-fill reconciliation ledger, idempotent closed-PnL trade creation, API visibility, metrics, and migration.
 - Add Alembic migration foundation and database migration CLI commands.
 - Add GitHub/portfolio documentation polish.
 - Add current README architecture diagram, safety position, quickstart, and roadmap status.
