@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     atr_tp_mult: float = Field(default=1.6, gt=0)
     vol_mult: float = Field(default=1.5, gt=0)
     vol_ma_len: int = Field(default=20, gt=0)
+    vwap_window: int = Field(default=0, ge=0)
     rsi_long_min: float = Field(default=48.0, ge=0, le=100)
     rsi_short_max: float = Field(default=52.0, ge=0, le=100)
     cooldown_candles: int = Field(default=1, ge=0)
@@ -81,6 +82,13 @@ class Settings(BaseSettings):
     historical_data_csv: Path | None = None
     historical_data_dir: Path | None = None
     backtest_report_dir: Path = Path("reports/backtests")
+    walk_forward_train_size: int = Field(default=500, gt=0)
+    walk_forward_validation_size: int = Field(default=100, gt=0)
+    walk_forward_step_size: int = Field(default=100, gt=0)
+    walk_forward_trials: int = Field(default=30, gt=0)
+    walk_forward_objective: Literal["sharpe", "sortino", "total_return", "profit_factor", "win_rate"] = "sharpe"
+    walk_forward_random_seed: int = 42
+    walk_forward_report_dir: Path = Path("reports/optimizations")
 
     database_url: str = "sqlite:///./trading_bot.db"
     redis_url: str = "redis://localhost:6379/0"
@@ -176,6 +184,8 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
     telegram = data.get("telegram", {})
     logging_config = data.get("logging", {})
     backtest = data.get("backtest", {})
+    optimization = data.get("optimization", {})
+    walk_forward = optimization.get("walk_forward", {})
     market_data = data.get("market_data", {})
 
     values: dict[str, Any] = {
@@ -192,6 +202,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "atr_tp_mult": strategy.get("atr_tp_mult"),
         "vol_mult": strategy.get("vol_mult"),
         "vol_ma_len": strategy.get("vol_ma_len"),
+        "vwap_window": strategy.get("vwap_window"),
         "rsi_long_min": strategy.get("rsi_long_min"),
         "rsi_short_max": strategy.get("rsi_short_max"),
         "cooldown_candles": strategy.get("cooldown_candles"),
@@ -217,6 +228,13 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "historical_data_csv": backtest.get("historical_data_csv"),
         "historical_data_dir": backtest.get("historical_data_dir"),
         "backtest_report_dir": backtest.get("report_dir"),
+        "walk_forward_train_size": walk_forward.get("train_size"),
+        "walk_forward_validation_size": walk_forward.get("validation_size"),
+        "walk_forward_step_size": walk_forward.get("step_size"),
+        "walk_forward_trials": walk_forward.get("trials"),
+        "walk_forward_objective": walk_forward.get("objective"),
+        "walk_forward_random_seed": walk_forward.get("random_seed"),
+        "walk_forward_report_dir": walk_forward.get("report_dir"),
         "market_data_source": market_data.get("source"),
         "market_data_channel": market_data.get("channel"),
         "market_data_history_size": market_data.get("history_size"),

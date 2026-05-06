@@ -17,6 +17,7 @@ strategy:
   atr_tp_mult: 1.6
   vol_mult: 1.5
   vol_ma_len: 20
+  vwap_window: 0  # 0 = cumulative VWAP; >0 = rolling VWAP window
   rsi_long_min: 48
   rsi_short_max: 52
   cooldown_candles: 1
@@ -53,6 +54,16 @@ backtest:
   historical_data_csv: null
   historical_data_dir: null
   report_dir: reports/backtests
+
+optimization:
+  walk_forward:
+    train_size: 500
+    validation_size: 100
+    step_size: 100
+    trials: 30
+    objective: sharpe
+    random_seed: 42
+    report_dir: reports/optimizations
 
 market_data:
   # rest = live strategy loop polls Binance REST.

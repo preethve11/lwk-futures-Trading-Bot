@@ -4,6 +4,7 @@ Trading Bot CLI: backtest | live
 Usage:
   python main.py backtest [--config config.yaml]
   python main.py backtest-multi [--config config.yaml]
+  python main.py walk-forward [--config config.yaml]
   python main.py live [--config config.yaml]
   python main.py api [--config config.yaml]
   python main.py market-data [--config config.yaml]
@@ -26,6 +27,7 @@ if str(ROOT) not in sys.path:
 
 from app.backtesting.data_loader import load_csv_ohlcv
 from app.backtesting.multi_symbol import BacktestReportExporter, MultiSymbolBacktestRunner
+from app.backtesting.walk_forward import WalkForwardOptimizer, WalkForwardReportExporter
 from app.core.config import Settings
 from app.market_data.binance_ws import BinanceKlineStreamService
 from app.market_data.redis_store import RedisKlineStore
@@ -147,6 +149,74 @@ def run_multi_backtest(config_path: Path | None, report_json: Path | None, repor
     if report_html is not None:
         print(f"HTML report: {report_html}")
     return 0
+
+
+def run_walk_forward(config_path: Path | None, report_json: Path | None) -> int:
+    """Run walk-forward strategy optimization and export an out-of-sample report."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    logger = logging.getLogger("trading_bot")
+    candles = _load_walk_forward_dataset(settings, logger)
+    if candles is None:
+        return 1
+
+    optimizer = WalkForwardOptimizer(
+        settings,
+        train_size=settings.walk_forward_train_size,
+        validation_size=settings.walk_forward_validation_size,
+        step_size=settings.walk_forward_step_size,
+        n_trials=settings.walk_forward_trials,
+        objective=settings.walk_forward_objective,
+        random_seed=settings.walk_forward_random_seed,
+    )
+    report = optimizer.run(candles, symbol=settings.symbol, timeframe=settings.timeframe)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    json_path = report_json or settings.walk_forward_report_dir / f"walk_forward_{settings.symbol}_{timestamp}.json"
+    WalkForwardReportExporter.write_json(report, json_path)
+
+    metrics = report.aggregate.metrics
+    print("\n--- Walk-Forward Optimization Results ---")
+    print(f"Symbol: {report.symbol}")
+    print(f"Windows: {len(report.windows)}")
+    print(f"Trials per window: {report.n_trials}")
+    print(f"Objective: {report.objective}")
+    print(f"Out-of-sample trades: {metrics.total_trades}")
+    print(f"Out-of-sample return: {metrics.total_return_pct:.2f}%")
+    print(f"Out-of-sample Sharpe: {metrics.sharpe_ratio:.2f}")
+    print(f"Out-of-sample Sortino: {metrics.sortino_ratio:.2f}")
+    print(f"Out-of-sample max drawdown: {metrics.max_drawdown_pct:.2f}%")
+    print(f"Report: {json_path}")
+    return 0
+
+
+def _load_walk_forward_dataset(settings: Settings, logger: logging.Logger) -> pd.DataFrame | None:
+    if settings.historical_data_csv is not None:
+        return load_csv_ohlcv(
+            settings.historical_data_csv,
+            start=settings.backtest_start,
+            end=settings.backtest_end,
+        )
+
+    if settings.historical_data_dir is not None:
+        csv_path = _resolve_symbol_csv(settings.historical_data_dir, settings.symbol, settings.timeframe)
+        if csv_path is None:
+            logger.error("Missing historical CSV for walk-forward symbol", extra={"symbol": settings.symbol})
+            return None
+        return load_csv_ohlcv(csv_path, start=settings.backtest_start, end=settings.backtest_end)
+
+    if not settings.active_binance_api_key or not settings.active_binance_api_secret:
+        logger.error("Walk-forward optimization needs Binance API keys, HISTORICAL_DATA_CSV, or HISTORICAL_DATA_DIR")
+        return None
+
+    client = BinanceFuturesClient(
+        settings.active_binance_api_key,
+        settings.active_binance_api_secret,
+        testnet=settings.use_testnet,
+    )
+    required = settings.walk_forward_train_size + settings.walk_forward_validation_size
+    limit = min(1500, max(required + settings.walk_forward_step_size * 4, required))
+    return client.get_klines(settings.symbol, settings.timeframe, limit=limit)
 
 
 def _load_multi_symbol_datasets(settings: Settings, logger: logging.Logger) -> dict[str, pd.DataFrame]:
@@ -277,12 +347,13 @@ async def _run_market_data_async(settings: Settings, max_messages: int | None) -
     finally:
         await redis_client.aclose()
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Trading Bot CLI")
     parser.add_argument(
         "mode",
-        choices=["backtest", "backtest-multi", "live", "api", "market-data"],
-        help="Run backtest, live, api, or market-data",
+        choices=["backtest", "backtest-multi", "walk-forward", "live", "api", "market-data"],
+        help="Run backtest, backtest-multi, walk-forward, live, api, or market-data",
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
     parser.add_argument("--host", default="127.0.0.1", help="API host")
@@ -295,6 +366,8 @@ def main() -> int:
         return run_backtest(args.config)
     if args.mode == "backtest-multi":
         return run_multi_backtest(args.config, args.report_json, args.report_html)
+    if args.mode == "walk-forward":
+        return run_walk_forward(args.config, args.report_json)
     if args.mode == "api":
         import uvicorn
 
