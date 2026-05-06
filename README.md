@@ -1,192 +1,292 @@
-# Trading Bot
+# LWK Futures Trading Bot
 
-Modular, production-grade algorithmic trading bot for Binance USDT-M Futures. Supports backtesting and live trading with configurable risk management and performance analytics.
+[![CI](https://github.com/preethve11/lwk-futures-Trading-Bot/actions/workflows/ci.yml/badge.svg)](https://github.com/preethve11/lwk-futures-Trading-Bot/actions/workflows/ci.yml)
 
----
+Production-oriented automated crypto futures trading platform for Binance USDT-M Futures. The project includes a strategy engine, risk controls, exchange execution safety, persistence, FastAPI operator API, React dashboard, backtesting, optimization, simulation, market-data streaming, monitoring, and deployment assets.
 
-## Project Overview
+This repository is built for research, testnet operation, and engineering portfolio review. Treat real-money trading as an additional production-hardening phase, not a default mode.
 
-This bot implements a **scalping strategy** (EMA + RSI + VWAP + volume spike) with:
+## What Is Included
 
-- **Strategy:** Long when EMA(9) > EMA(21), price > VWAP, RSI > 48, volume spike; Short with opposite conditions. ATR-based stop loss and take profit.
-- **Risk:** Fixed dollar risk per trade (loss at stop = `RISK_PER_TRADE_USD`), daily loss cap, max drawdown, min risk-reward, optional ATR position cap.
-- **Execution:** Binance Futures (testnet and live), retry on rate limit, SL/TP orders placed with market entry.
+- EMA/RSI/VWAP/volume scalping strategy with ATR stops and take-profits.
+- Strict risk controls: fixed dollar risk, daily loss lock, drawdown lock, risk-reward checks, min notional, manual pause, and kill switch.
+- Binance Futures execution client with symbol-info caching and live trading guard.
+- Order protection state machine and reconciliation worker for SL/TP verification and emergency close.
+- SQLAlchemy persistence for sessions, signals, orders, positions, trades, risk events, backtests, and AI reports.
+- Repository layer for database access.
+- FastAPI operator API with token auth, WebSocket live events, readiness, and Prometheus metrics.
+- React/Vite dashboard for live status, risk controls, trades, backtests, equity curve, logs/events, and AI journal output.
+- Multi-symbol backtesting, JSON report export, walk-forward optimization, and Monte Carlo simulation.
+- Binance WebSocket kline market-data service with Redis pub/sub/cache.
+- Advisory-only AI trade journal. AI can explain decisions but cannot place orders or mutate trading state.
+- Docker Compose stack for backend, frontend, Postgres, Redis, optional market-data worker, Prometheus, and Grafana.
+- CI pipeline with lint, strict app mypy, tests, frontend build, Docker builds, Compose config, and gitleaks secret scanning.
 
-The codebase is structured for **hedge-fund level quality**: clean architecture, strategy/execution/risk separation, backtesting with slippage and fees, performance metrics (Sharpe, Sortino, max drawdown, win rate, profit factor, expectancy), and production features (config, logging, Docker, CLI).
+## Architecture
 
----
+```mermaid
+flowchart LR
+    subgraph Inputs
+        YAML["config.yaml"]
+        ENV[".env / secrets"]
+        BINANCE_WS["Binance kline WebSocket"]
+        CSV["CSV / historical data"]
+    end
 
-## Strategy Explanation
+    subgraph Core
+        SETTINGS["Pydantic Settings"]
+        REGISTRY["StrategyRegistry"]
+        STRATEGY["EMA RSI VWAP Strategy"]
+        RISK["RiskManager"]
+        EXEC["Execution Client"]
+        RECON["ReconciliationWorker"]
+    end
 
-- **Indicators:** EMA(9), EMA(21), RSI(7), ATR(14), VWAP (over lookback), volume 20-period MA.
-- **Entry (long):** EMA fast > EMA slow, close > VWAP, RSI > 48, volume > 1.5× vol_ma, ATR > 0.
-- **Entry (short):** EMA fast < EMA slow, close < VWAP, RSI < 52, same volume/ATR filter.
-- **Exit:** Stop loss = entry ± ATR×0.8; Take profit = entry ± ATR×1.6 (configurable).
-- **Signal bar:** Uses **closed candle only** (no repainting).
+    subgraph Persistence
+        DB[("Postgres / SQLite")]
+        REPOS["Repository Layer"]
+    end
 
----
+    subgraph Operators
+        API["FastAPI API"]
+        WS["/ws/live"]
+        DASH["React Dashboard"]
+        ALERTS["Async Alerts"]
+        METRICS["/metrics"]
+    end
 
-## Installation
+    subgraph Research
+        BACKTEST["Backtest Engine"]
+        MULTI["Multi-symbol Runner"]
+        WFO["Walk-forward Optimizer"]
+        MC["Monte Carlo"]
+        AI["AI Trade Journal"]
+    end
 
-### Requirements
-
-- Python 3.10+
-- pip
-
-### Steps
-
-1. **Clone and enter the project**
-   ```bash
-   cd pythonbot
-   ```
-
-2. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # Linux/macOS
-   # or: venv\Scripts\activate  # Windows
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configuration (local only — safe for GitHub)**
-   - Copy `.env.example` to `.env` (`.env` is in `.gitignore` and is **never** committed).
-   - **Option A:** Set `BINANCE_API_KEY` and `BINANCE_API_SECRET`; set `USE_TESTNET=true` for demo or `false` for live.
-   - **Option B (recommended):** Set `BINANCE_TESTNET_API_KEY` / `BINANCE_TESTNET_API_SECRET` (from [Binance Testnet](https://testnet.binancefuture.com)) and `BINANCE_MAINNET_API_KEY` / `BINANCE_MAINNET_API_SECRET` (from Binance → API Management). Toggle `USE_TESTNET=true` or `false` to switch without editing keys.
-   - Optionally set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts.
-   - Adjust `config.yaml` for strategy/risk/execution (or use env overrides).
-
----
-
-## Configuration Guide
-
-- **`.env`** — Local secrets only (never commit). API keys, `USE_TESTNET`, `SYMBOL`, `TIMEFRAME`, `LEVERAGE`, `RISK_PER_TRADE_USD`, `MAX_DAILY_LOSS_USD`, Telegram. Use `.env.example` as the template; it is safe to commit.
-- **`config.yaml`** — Strategy (EMA/RSI/ATR/VWAP params), risk (caps, min R:R), execution (leverage, slippage/fee for backtest), logging, backtest dates and initial capital.
-
-Env vars override `config.yaml` for the same keys.
-
----
-
-## How to Run Backtest
-
-```bash
-python main.py backtest [--config path/to/config.yaml]
+    BINANCE_WS --> REDIS[("Redis")]
+    REDIS --> STRATEGY
+    CSV --> BACKTEST
+    YAML --> SETTINGS
+    ENV --> SETTINGS
+    SETTINGS --> REGISTRY
+    REGISTRY --> STRATEGY
+    STRATEGY --> RISK
+    RISK --> EXEC
+    EXEC --> RECON
+    RECON --> REPOS
+    RISK --> REPOS
+    BACKTEST --> REPOS
+    MULTI --> REPOS
+    WFO --> BACKTEST
+    MC --> REPOS
+    AI --> REPOS
+    REPOS --> DB
+    API --> REPOS
+    DASH --> API
+    API --> WS
+    API --> METRICS
+    EXEC --> ALERTS
 ```
 
-- Fetches klines from Binance (using API keys in `.env`).
-- Runs the strategy with slippage and fee simulation.
-- Prints: total trades, return %, Sharpe, Sortino, max drawdown, win rate, profit factor, expectancy.
+More detail: [docs/architecture.md](docs/architecture.md)
 
----
+## 5-Minute Testnet Quickstart
 
-## How to Run Live Trading
+1. Install Python 3.11+, Node 22+, Docker Desktop, and Docker Compose.
+2. Clone the repo and install backend dependencies:
 
-```bash
-python main.py live [--config path/to/config.yaml]
+```powershell
+py -m pip install -r requirements.txt
 ```
 
-- Connects to Binance Futures (testnet if `USE_TESTNET=true`).
-- Sets leverage and loads symbol filters.
-- Main loop: check daily loss cap → fetch klines → compute indicators → generate signal → risk check → place market + SL/TP.
-- Sends Telegram alerts on entry and hourly summary (if configured).
-- Use **testnet first** and small `RISK_PER_TRADE_USD`.
+3. Copy `.env.example` to `.env`, then fill only testnet-safe values:
 
----
-
-## Troubleshooting
-
-- **`APIError(code=-2015): Invalid API-key, IP, or permissions`**  
-  Binance returns this when:
-  - The API key does **not** have **Enable Futures** (or **Enable USDT-M Futures**) checked. Create a new key or edit the key and enable Futures.
-  - You are using a **mainnet** key while `USE_TESTNET=true` (or the opposite). Use a key created on [Binance Testnet](https://testnet.binancefuture.com) for testnet.
-  - The key has **IP access restrictions** and your current IP (`157.51.142.3` or similar) is not in the allow list. Add your IP or disable the restriction.
-
-- **Backtest: "Daily loss cap reached" many times**  
-  Fixed: the backtest now resets daily loss at the start of each new calendar day, so the cap applies per day, not over the whole run.
-
----
-
-## Risk Disclaimer
-
-Trading futures involves substantial risk of loss. This software is for educational and research purposes. Past backtest results do not guarantee future performance. Use testnet before live trading. Never risk more than you can afford to lose. The authors are not responsible for any financial losses.
-
----
-
-## Performance Metrics Explained
-
-| Metric | Description |
-|--------|-------------|
-| **Sharpe Ratio** | Risk-adjusted return (excess return per unit of volatility). Higher is better. |
-| **Sortino Ratio** | Like Sharpe but uses downside deviation only. |
-| **Max Drawdown** | Largest peak-to-trough decline (%). |
-| **Win Rate** | Fraction of trades with positive PnL. |
-| **Profit Factor** | Gross profit / gross loss. >1 is profitable. |
-| **Expectancy** | Average PnL per trade (USD). |
-
----
-
-## Example Results (Backtest)
-
-After running `python main.py backtest` you will see output similar to:
-
-```
---- Backtest Results ---
-Total trades: 42 (wins: 24, losses: 18)
-Total return: 5.32%
-Sharpe ratio: 0.89
-Sortino ratio: 1.12
-Max drawdown: 8.45%
-Win rate: 57.1%
-Profit factor: 1.35
-Expectancy: 12.50 USD/trade
+```env
+USE_TESTNET=true
+CONFIRM_LIVE_TRADING=false
+BINANCE_TESTNET_API_KEY=...
+BINANCE_TESTNET_API_SECRET=...
+API_TOKEN=local-dev-token
 ```
 
-(Exact numbers depend on symbol, timeframe, and history.)
+4. Run local verification:
 
----
-
-## Roadmap
-
-- [ ] Multi-symbol / portfolio mode
-- [ ] Walk-forward optimization runner (using `trading_bot/backtesting/walk_forward.py`)
-- [ ] Monte Carlo report (using `trading_bot/analytics/monte_carlo.py`)
-- [ ] Trailing stop (logic in risk; execution support)
-- [ ] Optional async execution and websocket streams
-
----
-
-## Contribution Guide
-
-1. Fork the repo.
-2. Create a feature branch. Follow existing style (type hints, docstrings, no secrets in code).
-3. Add/update tests under `tests/`.
-4. Run tests: `pytest tests/`.
-5. Submit a pull request.
-
----
-
-## Folder Structure
-
-```
-trading_bot/
-  core/           # Config, types, logging
-  strategies/     # Base + EMA/RSI/VWAP strategy
-  risk/           # Position sizing, daily loss, drawdown
-  execution/      # Exchange abstraction + Binance Futures
-  backtesting/    # Engine, walk-forward
-  analytics/      # Metrics, Monte Carlo
-  utils/          # Telegram, timeframes, exchange filters
-main.py           # CLI: backtest | live
-config.yaml
-.env.example
-requirements.txt
-Dockerfile
-README.md
-AUDIT_REPORT.md
-ARCHITECTURE.md
+```powershell
+py -m pytest tests/ -q --basetemp C:\Users\Preethve\lwk-futures-Trading-Bot\pytest_tmp
+py -m ruff check .
+py -m mypy app --strict
 ```
 
-See **ARCHITECTURE.md** for how components fit together and how to add strategies, deploy, and avoid overfitting.
+5. Start the platform:
+
+```powershell
+docker compose --profile monitoring up --build
+```
+
+6. Open:
+
+- Dashboard: `http://localhost:8080`
+- API docs: `http://localhost:8000/docs`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+
+Full guide: [docs/testnet-quickstart.md](docs/testnet-quickstart.md)
+
+## Common Commands
+
+```powershell
+# Backtest
+py main.py backtest
+
+# Multi-symbol backtest, using SYMBOLS from env or config.yaml
+py main.py backtest-multi --report-json reports/backtests/multi.json
+
+# Walk-forward optimization
+py main.py walk-forward --report-json reports/optimizations/walk_forward.json
+
+# Monte Carlo simulation
+py main.py monte-carlo --returns-json reports/backtests/example.json --report-json reports/monte_carlo/example.json
+
+# API
+py main.py api --host 127.0.0.1 --port 8000
+
+# Market-data WebSocket worker
+py main.py market-data
+
+# Live loop, testnet first
+py main.py live
+```
+
+## API Surface
+
+Key endpoints:
+
+- `GET /health`
+- `GET /ready`
+- `GET /metrics`
+- `GET /configs`, `POST /configs`
+- `GET /backtests`, `POST /backtests/run`, `POST /backtests/run-multi`
+- `GET /trades`, `GET /trades/{id}`
+- `GET /sessions`, `POST /sessions/start`, `POST /sessions/stop`
+- `GET /risk/state`, `POST /risk/state`, `POST /risk/kill-switch`, `GET /risk/events`
+- `GET /signals`
+- `GET /positions`
+- `GET /ai-reports`
+- `WebSocket /ws/live`
+
+Protected operator routes use `X-API-Token` or `Authorization: Bearer <token>` when `API_TOKEN` is configured.
+
+## Safety Position
+
+This project is deliberately conservative:
+
+- Mainnet requires `USE_TESTNET=false` and `CONFIRM_LIVE_TRADING=true`.
+- The live loop must not block on Telegram, AI, or dashboard calls.
+- SL/TP protection is verified after entry.
+- Failed protection can trigger emergency close and manual review.
+- AI reports are advisory-only and cannot call execution clients or mutate state.
+- Metrics and logs are operational aids, not trading signals.
+
+Read before live use: [docs/safety.md](docs/safety.md)
+
+## Backtesting And Research
+
+Reports include Sharpe, Sortino, max drawdown, win rate, profit factor, average R:R, equity curves, and JSON export paths. Use walk-forward and Monte Carlo before trusting a parameter set.
+
+Example report: [docs/example-backtest-report.md](docs/example-backtest-report.md)
+
+## Deployment
+
+Local production-style stack:
+
+```powershell
+docker compose up --build
+docker compose --profile market-data up --build
+docker compose --profile monitoring up --build
+```
+
+Deployment and incident runbook: [docs/deployment-monitoring.md](docs/deployment-monitoring.md)
+
+## Repository Map
+
+```text
+app/
+  ai/              advisory-only AI journal
+  analytics/       Monte Carlo simulation
+  api/             FastAPI app, routers, schemas, event bus
+  backtesting/     multi-symbol and walk-forward tooling
+  core/            Pydantic settings
+  market_data/     Binance WebSocket + Redis market data
+  monitoring/      readiness and Prometheus metrics
+  persistence/     SQLAlchemy models, repositories, state machine
+  strategies/      strategy registry
+  workers/         live trader and reconciliation worker
+frontend/          React/Vite operator dashboard
+monitoring/        Prometheus and Grafana provisioning
+deploy/            deployment env templates
+docs/              operator and roadmap documentation
+tests/             backend tests
+trading_bot/       core strategy, risk, execution, analytics primitives
+```
+
+## Verification
+
+Current CI runs:
+
+- `ruff check .`
+- `mypy app --strict --ignore-missing-imports`
+- `pytest tests/`
+- market-data CLI smoke
+- Monte Carlo CLI smoke
+- frontend install/test/build
+- backend Docker build
+- frontend Docker build
+- base Compose config
+- monitoring Compose config
+- gitleaks secret scan
+
+Local full check:
+
+```powershell
+py -m pytest tests/ -q --basetemp C:\Users\Preethve\lwk-futures-Trading-Bot\pytest_tmp
+py -m ruff check .
+py -m mypy app --strict
+npm test --prefix frontend
+npm run build --prefix frontend
+docker compose config
+docker compose --profile monitoring config
+```
+
+## Roadmap Status
+
+Completed:
+
+- Day 1: CI, tests, Pydantic settings foundation, live trading guard, backtest date filtering, historical data loading.
+- Day 2: runtime refactor, settings wrapper, structured logging, strategy registry, live worker, Binance symbol cache.
+- Day 3: persistence models, repositories, DB helpers, order state machine, live/backtest persistence hooks.
+- Day 4: reconciliation worker, protected order result, alert severity, async alert queue, emergency path tests.
+- Day 5: FastAPI API, token auth, repository-backed routes, WebSocket live events.
+- Day 6: React dashboard shell and core operator pages.
+- Day 7: multi-symbol backtesting, JSON reports, Docker Compose with Postgres/Redis/frontend/backend.
+- Week 2: market-data WebSocket/Redis service, walk-forward optimizer, Monte Carlo simulation, AI trade journal, deployment monitoring.
+
+Still recommended:
+
+- Alembic migration runner.
+- Production exchange fill reconciliation.
+- Mainnet dry-run checklist and small-notional test protocol.
+- VPS TLS/reverse-proxy automation.
+- Backup and restore automation.
+- More frontend component and WebSocket tests.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+Do not commit secrets. Report security issues using [SECURITY.md](SECURITY.md).
+
+## License
+
+MIT License. See [LICENSE](LICENSE).
