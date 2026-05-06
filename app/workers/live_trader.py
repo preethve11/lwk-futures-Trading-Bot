@@ -21,6 +21,7 @@ from app.persistence.repositories import (
     SignalRepository,
 )
 from app.strategies.registry import StrategyRegistry, create_default_strategy_registry
+from app.workers.exchange_reconciliation import ExchangeReconciliationWorker
 from app.workers.reconciliation import ReconciliationOutcome, ReconciliationWorker
 from trading_bot.core.types import Signal
 from trading_bot.execution.base import ExecutionClient, OrderResult
@@ -69,6 +70,7 @@ class LiveTrader:
         ai_journal_queue = self.ai_journal_queue or self._create_ai_journal_queue(session_factory)
         bot_session_id = self._start_bot_session(session_factory)
         reconciliation_worker = ReconciliationWorker(client, self.alert_queue)
+        exchange_reconciliation_worker = ExchangeReconciliationWorker(session_factory)
         cooldown_s = timeframe_minutes(self.settings.timeframe) * 60
         last_signal_ts = 0.0
         last_hourly = datetime.now(timezone.utc)
@@ -86,7 +88,13 @@ class LiveTrader:
         try:
             while True:
                 try:
-                    daily_loss = self._sync_daily_loss(client, risk_manager)
+                    recent_account_trades = client.fetch_recent_trades(self.settings.symbol, limit=500)
+                    daily_loss = self._sync_daily_loss(recent_account_trades, risk_manager)
+                    self._record_exchange_reconciliation(
+                        exchange_reconciliation_worker,
+                        bot_session_id,
+                        recent_account_trades,
+                    )
                     if not risk_manager.check_daily_loss():
                         self.logger.warning("Daily loss cap reached", extra={"symbol": self.settings.symbol})
                         self.alert_queue.enqueue(
@@ -286,18 +294,60 @@ class LiveTrader:
             symbol_info=symbol_info,
         )
 
-    def _sync_daily_loss(self, client: ExecutionClient, risk_manager: RiskManager) -> float:
-        trades = client.fetch_recent_trades(self.settings.symbol, limit=500)
+    def _sync_daily_loss(self, trades: list[dict[str, object]], risk_manager: RiskManager) -> float:
         now_date = datetime.now(timezone.utc).date()
         day_start_ts = int(datetime.combine(now_date, datetime.min.time(), tzinfo=timezone.utc).timestamp() * 1000)
         realized = sum(
-            float(trade.get("realizedPnl", 0))
+            self._account_trade_float(trade.get("realizedPnl"))
             for trade in trades
-            if int(trade.get("time", 0)) >= day_start_ts
+            if self._account_trade_int(trade.get("time")) >= day_start_ts
         )
         daily_loss = max(0.0, -realized)
         risk_manager.set_daily_loss(daily_loss, now_date)
         return daily_loss
+
+    def _account_trade_float(self, value: object) -> float:
+        if not isinstance(value, (str, bytes, bytearray, int, float)):
+            return 0.0
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _account_trade_int(self, value: object) -> int:
+        if not isinstance(value, (str, bytes, bytearray, int, float)):
+            return 0
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    def _record_exchange_reconciliation(
+        self,
+        worker: ExchangeReconciliationWorker,
+        bot_session_id: int | None,
+        recent_account_trades: list[dict[str, object]],
+    ) -> None:
+        if not recent_account_trades:
+            return
+        try:
+            summary = worker.reconcile_raw_fills(
+                symbol=self.settings.symbol,
+                raw_fills=recent_account_trades,
+                bot_session_id=bot_session_id,
+            )
+            if summary.closed_trades_created > 0 or summary.parse_errors:
+                self.logger.info(
+                    "Exchange account trades reconciled",
+                    extra={
+                        "symbol": self.settings.symbol,
+                        "fills_created": summary.fills_created,
+                        "closed_trades_created": summary.closed_trades_created,
+                        "parse_errors": len(summary.parse_errors),
+                    },
+                )
+        except Exception as exc:
+            self.logger.exception("Could not reconcile exchange account trades", extra={"error": str(exc)})
 
     def _create_runtime_session_factory(self) -> SessionFactory:
         session_factory = self.session_factory or create_session_factory(self.settings.database_url)

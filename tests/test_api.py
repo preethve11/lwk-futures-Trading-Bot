@@ -8,7 +8,15 @@ from app.api.main import create_app
 from app.core.config import Settings
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
 from app.persistence.models import PositionModel
-from app.persistence.repositories import AIReportRepository, BotSessionRepository, RiskEventRepository, SignalRepository, TradeRepository
+from app.exchange.fills import parse_exchange_fill
+from app.persistence.repositories import (
+    AIReportRepository,
+    BotSessionRepository,
+    ExchangeFillRepository,
+    RiskEventRepository,
+    SignalRepository,
+    TradeRepository,
+)
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Signal, SignalSide, Trade
 
@@ -117,6 +125,27 @@ def _seed_data(factory: SessionFactory) -> None:
             market_regime={"ema_trend": "bullish"},
             outcome={"protected": True},
         )
+        ExchangeFillRepository(session).create_from_fill(
+            parse_exchange_fill(
+                {
+                    "symbol": "ZECUSDT",
+                    "id": 9001,
+                    "orderId": 7001,
+                    "side": "SELL",
+                    "price": "102.0",
+                    "qty": "0.5",
+                    "quoteQty": "51.0",
+                    "realizedPnl": "1.0",
+                    "commission": "0.01",
+                    "commissionAsset": "USDT",
+                    "buyer": False,
+                    "maker": False,
+                    "time": 1767225900000,
+                },
+                fallback_symbol="ZECUSDT",
+            ),
+            bot_session_id=bot_session.id,
+        )
 
 
 def test_api_rejects_invalid_token() -> None:
@@ -171,6 +200,7 @@ def test_repository_backed_read_endpoints() -> None:
     positions = client.get("/positions", headers=_headers())
     risk_events = client.get("/risk/events", headers=_headers())
     ai_reports = client.get("/ai-reports", headers=_headers())
+    exchange_fills = client.get("/exchange-fills", headers=_headers())
 
     assert trades.status_code == 200
     assert trades.json()[0]["symbol"] == "ZECUSDT"
@@ -188,6 +218,8 @@ def test_repository_backed_read_endpoints() -> None:
     assert risk_events.json()[0]["severity"] == "CRITICAL"
     assert ai_reports.status_code == 200
     assert ai_reports.json()[0]["report_text"] == "advisory report"
+    assert exchange_fills.status_code == 200
+    assert exchange_fills.json()[0]["exchange_trade_id"] == "9001"
 
 
 def test_readiness_endpoint_checks_database() -> None:
@@ -214,6 +246,7 @@ def test_metrics_endpoint_exports_http_and_database_metrics() -> None:
     assert "trading_bot_open_positions 1.0" in response.text
     assert 'trading_bot_risk_events_total{severity="CRITICAL"} 1.0' in response.text
     assert 'trading_bot_persisted_records_total{table="ai_reports"} 1.0' in response.text
+    assert 'trading_bot_persisted_records_total{table="exchange_fills"} 1.0' in response.text
 
 
 def test_metrics_endpoint_requires_token_in_production() -> None:
