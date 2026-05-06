@@ -31,6 +31,7 @@ class EmaRsiVwapStrategy(BaseStrategy):
         atr_tp_mult: float = 1.6,
         vol_mult: float = 1.5,
         vol_ma_len: int = 20,
+        vwap_window: int = 0,
         rsi_long_min: float = 48,
         rsi_short_max: float = 52,
         cooldown_candles: int = 1,
@@ -43,16 +44,21 @@ class EmaRsiVwapStrategy(BaseStrategy):
         self.atr_tp_mult = atr_tp_mult
         self.vol_mult = vol_mult
         self.vol_ma_len = vol_ma_len
+        self.vwap_window = vwap_window
         self.rsi_long_min = rsi_long_min
         self.rsi_short_max = rsi_short_max
         self.cooldown_candles = cooldown_candles
 
     def compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        # VWAP (cumulative over series)
         typ = (df["high"] + df["low"] + df["close"]) / 3.0
-        pv = (typ * df["volume"]).cumsum()
-        cumv = df["volume"].cumsum()
+        price_volume = typ * df["volume"]
+        if self.vwap_window > 0:
+            pv = price_volume.rolling(self.vwap_window, min_periods=1).sum()
+            cumv = df["volume"].rolling(self.vwap_window, min_periods=1).sum()
+        else:
+            pv = price_volume.cumsum()
+            cumv = df["volume"].cumsum()
         df["vwap"] = pv / cumv.replace(0, np.nan).bfill()
         df["ema_fast"] = df["close"].ewm(span=self.ema_fast, adjust=False).mean()
         df["ema_slow"] = df["close"].ewm(span=self.ema_slow, adjust=False).mean()

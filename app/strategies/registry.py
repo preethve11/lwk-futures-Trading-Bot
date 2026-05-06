@@ -56,6 +56,7 @@ def _create_ema_rsi_vwap(settings: Settings) -> EmaRsiVwapStrategy:
         atr_tp_mult=settings.atr_tp_mult,
         vol_mult=settings.vol_mult,
         vol_ma_len=settings.vol_ma_len,
+        vwap_window=settings.vwap_window,
         rsi_long_min=settings.rsi_long_min,
         rsi_short_max=settings.rsi_short_max,
         cooldown_candles=settings.cooldown_candles,
