@@ -190,6 +190,53 @@ def test_repository_backed_read_endpoints() -> None:
     assert ai_reports.json()[0]["report_text"] == "advisory report"
 
 
+def test_readiness_endpoint_checks_database() -> None:
+    client, _ = _client()
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["details"]["database"] == "ok"
+
+
+def test_metrics_endpoint_exports_http_and_database_metrics() -> None:
+    client, factory = _client()
+    _seed_data(factory)
+
+    trades = client.get("/trades", headers=_headers())
+    response = client.get("/metrics")
+
+    assert trades.status_code == 200
+    assert response.status_code == 200
+    assert "trading_bot_http_requests_total" in response.text
+    assert 'path="/trades"' in response.text
+    assert "trading_bot_open_positions 1.0" in response.text
+    assert 'trading_bot_risk_events_total{severity="CRITICAL"} 1.0' in response.text
+    assert 'trading_bot_persisted_records_total{table="ai_reports"} 1.0' in response.text
+
+
+def test_metrics_endpoint_requires_token_in_production() -> None:
+    settings = Settings(
+        app_env="production",
+        api_token="secret",
+        database_url="sqlite:///:memory:",
+        metrics_token="metrics-secret",
+    )
+    factory = create_session_factory(settings.database_url)
+    init_db(factory)
+    client = TestClient(create_app(settings=settings, session_factory=factory, init_database=False))
+
+    missing = client.get("/metrics")
+    wrong = client.get("/metrics", headers={"X-Metrics-Token": "wrong"})
+    allowed = client.get("/metrics", headers={"Authorization": "Bearer metrics-secret"})
+
+    assert missing.status_code == 401
+    assert wrong.status_code == 401
+    assert allowed.status_code == 200
+    assert "trading_bot_build_info" in allowed.text
+
+
 def test_sessions_start_stop_and_risk_kill_switch() -> None:
     client, _ = _client()
 

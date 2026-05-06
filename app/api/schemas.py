@@ -12,6 +12,11 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class ReadinessResponse(BaseModel):
+    status: str
+    details: dict[str, str] = Field(default_factory=dict)
+
+
 class ConfigResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
