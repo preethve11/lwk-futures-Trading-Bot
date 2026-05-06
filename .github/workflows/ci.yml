@@ -48,6 +48,9 @@ jobs:
       - name: Pytest
         run: pytest tests/
 
+      - name: Market data CLI smoke
+        run: python main.py market-data --max-messages 0
+
       - name: Frontend install
         working-directory: frontend
         run: npm ci

@@ -6,11 +6,13 @@ Usage:
   python main.py backtest-multi [--config config.yaml]
   python main.py live [--config config.yaml]
   python main.py api [--config config.yaml]
+  python main.py market-data [--config config.yaml]
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 from datetime import datetime, timezone
@@ -25,6 +27,8 @@ if str(ROOT) not in sys.path:
 from app.backtesting.data_loader import load_csv_ohlcv
 from app.backtesting.multi_symbol import BacktestReportExporter, MultiSymbolBacktestRunner
 from app.core.config import Settings
+from app.market_data.binance_ws import BinanceKlineStreamService
+from app.market_data.redis_store import RedisKlineStore
 from app.persistence.database import create_session_factory, init_db, session_scope
 from app.persistence.repositories import TradeRepository
 from app.strategies.registry import create_default_strategy_registry
@@ -246,14 +250,46 @@ def run_live(config_path: Path | None) -> int:
     return LiveTrader(settings).run_forever()
 
 
+def run_market_data(config_path: Path | None, max_messages: int | None) -> int:
+    """Run Binance kline WebSocket ingestion into Redis."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    return asyncio.run(_run_market_data_async(settings, max_messages=max_messages))
+
+
+async def _run_market_data_async(settings: Settings, max_messages: int | None) -> int:
+    from redis.asyncio import Redis
+
+    redis_client = Redis.from_url(settings.redis_url)
+    try:
+        service = BinanceKlineStreamService(
+            symbols=settings.symbols or [settings.symbol],
+            interval=settings.timeframe,
+            redis_client=redis_client,
+            store=RedisKlineStore(history_size=settings.market_data_history_size),
+            testnet=settings.use_testnet,
+            base_channel=settings.market_data_channel,
+            reconnect_backoff_seconds=settings.market_data_reconnect_backoff_seconds,
+        )
+        published = await service.run(max_messages=max_messages)
+        logging.getLogger("trading_bot.market_data").info("Market data service stopped", extra={"published": published})
+        return 0
+    finally:
+        await redis_client.aclose()
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Trading Bot CLI")
-    parser.add_argument("mode", choices=["backtest", "backtest-multi", "live", "api"], help="Run backtest, live, or api")
+    parser.add_argument(
+        "mode",
+        choices=["backtest", "backtest-multi", "live", "api", "market-data"],
+        help="Run backtest, live, api, or market-data",
+    )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
     parser.add_argument("--host", default="127.0.0.1", help="API host")
     parser.add_argument("--port", type=int, default=8000, help="API port")
     parser.add_argument("--report-json", type=Path, default=None, help="Multi-symbol JSON report path")
     parser.add_argument("--report-html", type=Path, default=None, help="Optional multi-symbol HTML report path")
+    parser.add_argument("--max-messages", type=int, default=None, help="Stop market-data mode after N published messages")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
@@ -266,6 +302,8 @@ def main() -> int:
         setup_logging(settings.log_level, settings.log_dir, settings.log_file)
         uvicorn.run("app.api.main:app", host=args.host, port=args.port, reload=False)
         return 0
+    if args.mode == "market-data":
+        return run_market_data(args.config, args.max_messages)
     return run_live(args.config)
 
 

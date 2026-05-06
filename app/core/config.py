@@ -84,6 +84,10 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./trading_bot.db"
     redis_url: str = "redis://localhost:6379/0"
+    market_data_source: Literal["rest", "redis"] = "rest"
+    market_data_channel: str = "market_data.kline"
+    market_data_history_size: int = Field(default=500, gt=0)
+    market_data_reconnect_backoff_seconds: float = Field(default=2.0, gt=0)
     api_token: str = ""
     api_cors_origins: list[str] = Field(
         default_factory=lambda: [
@@ -172,6 +176,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
     telegram = data.get("telegram", {})
     logging_config = data.get("logging", {})
     backtest = data.get("backtest", {})
+    market_data = data.get("market_data", {})
 
     values: dict[str, Any] = {
         "use_testnet": api.get("use_testnet"),
@@ -212,5 +217,9 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "historical_data_csv": backtest.get("historical_data_csv"),
         "historical_data_dir": backtest.get("historical_data_dir"),
         "backtest_report_dir": backtest.get("report_dir"),
+        "market_data_source": market_data.get("source"),
+        "market_data_channel": market_data.get("channel"),
+        "market_data_history_size": market_data.get("history_size"),
+        "market_data_reconnect_backoff_seconds": market_data.get("reconnect_backoff_seconds"),
     }
     return {key: value for key, value in values.items() if value is not None}
