@@ -5,6 +5,7 @@ Usage:
   python main.py backtest [--config config.yaml]
   python main.py backtest-multi [--config config.yaml]
   python main.py walk-forward [--config config.yaml]
+  python main.py monte-carlo [--config config.yaml]
   python main.py live [--config config.yaml]
   python main.py api [--config config.yaml]
   python main.py market-data [--config config.yaml]
@@ -28,6 +29,7 @@ if str(ROOT) not in sys.path:
 from app.backtesting.data_loader import load_csv_ohlcv
 from app.backtesting.multi_symbol import BacktestReportExporter, MultiSymbolBacktestRunner
 from app.backtesting.walk_forward import WalkForwardOptimizer, WalkForwardReportExporter
+from app.analytics.monte_carlo import MonteCarloReportExporter, MonteCarloSimulator, load_trade_pnls_json
 from app.core.config import Settings
 from app.market_data.binance_ws import BinanceKlineStreamService
 from app.market_data.redis_store import RedisKlineStore
@@ -188,6 +190,70 @@ def run_walk_forward(config_path: Path | None, report_json: Path | None) -> int:
     print(f"Out-of-sample max drawdown: {metrics.max_drawdown_pct:.2f}%")
     print(f"Report: {json_path}")
     return 0
+
+
+def run_monte_carlo(
+    config_path: Path | None,
+    returns_json: Path | None,
+    report_json: Path | None,
+    simulations: int | None,
+    horizon_trades: int | None,
+    ruin_drawdown_pct: float | None,
+) -> int:
+    """Run Monte Carlo trade-return simulation and export a risk report."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    logger = logging.getLogger("trading_bot")
+    trade_pnls = _load_monte_carlo_trade_pnls(settings, logger, returns_json)
+    if not trade_pnls:
+        return 1
+
+    simulator = MonteCarloSimulator(
+        initial_capital=settings.backtest_initial_capital,
+        simulations=simulations or settings.monte_carlo_simulations,
+        horizon_trades=horizon_trades or settings.monte_carlo_horizon_trades,
+        ruin_drawdown_pct=ruin_drawdown_pct if ruin_drawdown_pct is not None else settings.monte_carlo_ruin_drawdown_pct,
+        random_seed=settings.monte_carlo_random_seed,
+    )
+    report = simulator.run(trade_pnls)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    json_path = report_json or settings.monte_carlo_report_dir / f"monte_carlo_{settings.symbol}_{timestamp}.json"
+    MonteCarloReportExporter.write_json(report, json_path)
+
+    print("\n--- Monte Carlo Simulation Results ---")
+    print(f"Input trades: {report.input_trade_count}")
+    print(f"Simulations: {report.simulations}")
+    print(f"Horizon trades: {report.horizon_trades}")
+    print(f"Probability of ruin: {report.probability_of_ruin * 100:.2f}%")
+    print(f"Final capital p05/p50/p95: {report.final_capital.percentile_5:.2f} / {report.final_capital.percentile_50:.2f} / {report.final_capital.percentile_95:.2f}")
+    print(f"Max drawdown p50/p95: {report.max_drawdown_pct.percentile_50:.2f}% / {report.max_drawdown_pct.percentile_95:.2f}%")
+    print(f"Report: {json_path}")
+    return 0
+
+
+def _load_monte_carlo_trade_pnls(
+    settings: Settings,
+    logger: logging.Logger,
+    returns_json: Path | None,
+) -> list[float]:
+    if returns_json is not None:
+        try:
+            return load_trade_pnls_json(returns_json, initial_capital=settings.backtest_initial_capital)
+        except Exception as exc:
+            logger.error("Could not load Monte Carlo returns JSON", extra={"path": str(returns_json), "error": str(exc)})
+            return []
+
+    session_factory = create_session_factory(settings.database_url)
+    try:
+        init_db(session_factory)
+        limit = max(settings.monte_carlo_horizon_trades * 10, 100)
+        with session_scope(session_factory) as session:
+            trades = TradeRepository(session).list_recent(symbol=settings.symbol, limit=limit)
+            return [trade.pnl for trade in trades]
+    except Exception as exc:
+        logger.error("Could not load persisted trades for Monte Carlo simulation", extra={"error": str(exc)})
+        return []
 
 
 def _load_walk_forward_dataset(settings: Settings, logger: logging.Logger) -> pd.DataFrame | None:
@@ -352,15 +418,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Trading Bot CLI")
     parser.add_argument(
         "mode",
-        choices=["backtest", "backtest-multi", "walk-forward", "live", "api", "market-data"],
-        help="Run backtest, backtest-multi, walk-forward, live, api, or market-data",
+        choices=["backtest", "backtest-multi", "walk-forward", "monte-carlo", "live", "api", "market-data"],
+        help="Run backtest, backtest-multi, walk-forward, monte-carlo, live, api, or market-data",
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
     parser.add_argument("--host", default="127.0.0.1", help="API host")
     parser.add_argument("--port", type=int, default=8000, help="API port")
-    parser.add_argument("--report-json", type=Path, default=None, help="Multi-symbol JSON report path")
+    parser.add_argument("--report-json", type=Path, default=None, help="JSON report output path")
     parser.add_argument("--report-html", type=Path, default=None, help="Optional multi-symbol HTML report path")
     parser.add_argument("--max-messages", type=int, default=None, help="Stop market-data mode after N published messages")
+    parser.add_argument("--returns-json", type=Path, default=None, help="Monte Carlo input JSON with pnls, returns, or equity_curve")
+    parser.add_argument("--simulations", type=int, default=None, help="Monte Carlo simulation count")
+    parser.add_argument("--horizon-trades", type=int, default=None, help="Monte Carlo forward trade horizon")
+    parser.add_argument("--ruin-drawdown-pct", type=float, default=None, help="Monte Carlo ruin threshold as drawdown percent")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
@@ -368,6 +438,15 @@ def main() -> int:
         return run_multi_backtest(args.config, args.report_json, args.report_html)
     if args.mode == "walk-forward":
         return run_walk_forward(args.config, args.report_json)
+    if args.mode == "monte-carlo":
+        return run_monte_carlo(
+            args.config,
+            args.returns_json,
+            args.report_json,
+            args.simulations,
+            args.horizon_trades,
+            args.ruin_drawdown_pct,
+        )
     if args.mode == "api":
         import uvicorn
 

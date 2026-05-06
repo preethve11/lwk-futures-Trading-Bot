@@ -64,6 +64,12 @@ optimization:
     objective: sharpe
     random_seed: 42
     report_dir: reports/optimizations
+  monte_carlo:
+    simulations: 1000
+    horizon_trades: 100
+    ruin_drawdown_pct: 30.0
+    random_seed: 42
+    report_dir: reports/monte_carlo
 
 market_data:
   # rest = live strategy loop polls Binance REST.
