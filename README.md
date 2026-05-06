@@ -153,6 +153,10 @@ py main.py api --host 127.0.0.1 --port 8000
 # Market-data WebSocket worker
 py main.py market-data
 
+# Database migrations
+py main.py db-upgrade --revision head
+py main.py db-current
+
 # Live loop, testnet first
 py main.py live
 ```
@@ -206,6 +210,8 @@ docker compose --profile monitoring up --build
 ```
 
 Deployment and incident runbook: [docs/deployment-monitoring.md](docs/deployment-monitoring.md)
+
+Database migrations: [docs/database-migrations.md](docs/database-migrations.md)
 
 ## Repository Map
 
@@ -272,7 +278,6 @@ Completed:
 
 Still recommended:
 
-- Alembic migration runner.
 - Production exchange fill reconciliation.
 - Mainnet dry-run checklist and small-notional test protocol.
 - VPS TLS/reverse-proxy automation.

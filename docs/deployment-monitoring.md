@@ -91,6 +91,7 @@ Use `/ready` for deployment health gates and `/health` for lightweight load bala
 4. Start with testnet only:
 
 ```bash
+python main.py db-upgrade --revision head
 docker compose --profile monitoring up -d --build
 ```
 
@@ -117,7 +118,7 @@ docker compose logs --tail=100 backend
 
 ## Known Deployment Gaps
 
-- There is no managed Alembic migration runner yet.
+- Alembic migration commands are available, but automated zero-downtime migration orchestration is still deferred.
 - Prometheus auth is endpoint-level; production deployments should keep Prometheus on a private network or add reverse-proxy authentication.
 - Grafana uses local Compose defaults unless overridden by environment variables.
 - Backups, TLS, DNS, and VPS firewall rules are documented here but not automated.

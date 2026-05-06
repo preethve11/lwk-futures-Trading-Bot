@@ -4,6 +4,7 @@ All notable changes are tracked here.
 
 ## Unreleased
 
+- Add Alembic migration foundation and database migration CLI commands.
 - Add GitHub/portfolio documentation polish.
 - Add current README architecture diagram, safety position, quickstart, and roadmap status.
 - Add contribution and security policies.
