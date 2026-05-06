@@ -26,8 +26,12 @@ def create_app(
 ) -> FastAPI:
     app_settings = settings or get_settings()
     factory = session_factory or create_session_factory(app_settings.database_url)
-    if init_database:
+    database_initialized = False
+    if init_database and app_settings.database_auto_create_tables:
         init_db(factory)
+        database_initialized = True
+    elif not app_settings.database_auto_create_tables:
+        database_initialized = True
 
     app = FastAPI(title="LWK Futures Trading Bot API", version="0.5.0")
     if app_settings.api_cors_origins:
@@ -40,7 +44,7 @@ def create_app(
         )
     app.state.settings = app_settings
     app.state.session_factory = factory
-    app.state.db_initialized = init_database
+    app.state.db_initialized = database_initialized
     app.state.event_bus = LiveEventBus()
     app.state.metrics = AppMetrics(version=app.version)
 

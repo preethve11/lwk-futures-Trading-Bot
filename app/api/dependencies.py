@@ -26,7 +26,9 @@ def get_session_factory(request: Request) -> SessionFactory:
         factory = create_session_factory(settings.database_url)
         request.app.state.session_factory = factory
     if not bool(getattr(request.app.state, "db_initialized", False)):
-        init_db(factory)
+        settings = get_app_settings(request)
+        if settings.database_auto_create_tables:
+            init_db(factory)
         request.app.state.db_initialized = True
     return factory
 

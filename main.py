@@ -6,6 +6,8 @@ Usage:
   python main.py backtest-multi [--config config.yaml]
   python main.py walk-forward [--config config.yaml]
   python main.py monte-carlo [--config config.yaml]
+  python main.py db-upgrade [--config config.yaml]
+  python main.py db-current [--config config.yaml]
   python main.py live [--config config.yaml]
   python main.py api [--config config.yaml]
   python main.py market-data [--config config.yaml]
@@ -393,6 +395,34 @@ def run_market_data(config_path: Path | None, max_messages: int | None) -> int:
     return asyncio.run(_run_market_data_async(settings, max_messages=max_messages))
 
 
+def run_db_upgrade(config_path: Path | None, revision: str) -> int:
+    """Run Alembic migrations to the requested revision."""
+    from alembic import command
+
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    command.upgrade(_alembic_config(settings.database_url), revision)
+    return 0
+
+
+def run_db_current(config_path: Path | None) -> int:
+    """Print the current Alembic database revision."""
+    from alembic import command
+
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    command.current(_alembic_config(settings.database_url), verbose=True)
+    return 0
+
+
+def _alembic_config(database_url: str):
+    from alembic.config import Config as AlembicConfig
+
+    config = AlembicConfig(str(ROOT / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    return config
+
+
 async def _run_market_data_async(settings: Settings, max_messages: int | None) -> int:
     from redis.asyncio import Redis
 
@@ -418,8 +448,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Trading Bot CLI")
     parser.add_argument(
         "mode",
-        choices=["backtest", "backtest-multi", "walk-forward", "monte-carlo", "live", "api", "market-data"],
-        help="Run backtest, backtest-multi, walk-forward, monte-carlo, live, api, or market-data",
+        choices=[
+            "backtest",
+            "backtest-multi",
+            "walk-forward",
+            "monte-carlo",
+            "db-upgrade",
+            "db-current",
+            "live",
+            "api",
+            "market-data",
+        ],
+        help="Run backtest, backtest-multi, walk-forward, monte-carlo, db-upgrade, db-current, live, api, or market-data",
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
     parser.add_argument("--host", default="127.0.0.1", help="API host")
@@ -431,6 +471,7 @@ def main() -> int:
     parser.add_argument("--simulations", type=int, default=None, help="Monte Carlo simulation count")
     parser.add_argument("--horizon-trades", type=int, default=None, help="Monte Carlo forward trade horizon")
     parser.add_argument("--ruin-drawdown-pct", type=float, default=None, help="Monte Carlo ruin threshold as drawdown percent")
+    parser.add_argument("--revision", default="head", help="Alembic revision for db-upgrade")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
@@ -447,6 +488,10 @@ def main() -> int:
             args.horizon_trades,
             args.ruin_drawdown_pct,
         )
+    if args.mode == "db-upgrade":
+        return run_db_upgrade(args.config, args.revision)
+    if args.mode == "db-current":
+        return run_db_current(args.config)
     if args.mode == "api":
         import uvicorn
 

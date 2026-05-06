@@ -61,6 +61,11 @@ jobs:
           PY
           python main.py monte-carlo --returns-json pytest_tmp/monte_carlo_input.json --report-json pytest_tmp/monte_carlo_report.json --simulations 10 --horizon-trades 5
 
+      - name: Alembic CLI smoke
+        run: |
+          DATABASE_URL=sqlite:///pytest_tmp/ci_migration.db python main.py db-upgrade --revision head
+          DATABASE_URL=sqlite:///pytest_tmp/ci_migration.db python main.py db-current
+
       - name: Frontend install
         working-directory: frontend
         run: npm ci

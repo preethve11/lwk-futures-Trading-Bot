@@ -55,6 +55,10 @@ backtest:
   historical_data_dir: null
   report_dir: reports/backtests
 
+persistence:
+  # Local/dev convenience. Production should run Alembic and set this false.
+  auto_create_tables: true
+
 optimization:
   walk_forward:
     train_size: 500

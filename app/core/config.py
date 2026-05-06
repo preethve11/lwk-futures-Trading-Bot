@@ -96,6 +96,7 @@ class Settings(BaseSettings):
     monte_carlo_report_dir: Path = Path("reports/monte_carlo")
 
     database_url: str = "sqlite:///./trading_bot.db"
+    database_auto_create_tables: bool = True
     redis_url: str = "redis://localhost:6379/0"
     market_data_source: Literal["rest", "redis"] = "rest"
     market_data_channel: str = "market_data.kline"
@@ -202,6 +203,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
     walk_forward = optimization.get("walk_forward", {})
     monte_carlo = optimization.get("monte_carlo", {})
     market_data = data.get("market_data", {})
+    persistence = data.get("persistence", {})
     ai_journal = data.get("ai_journal", {})
     monitoring = data.get("monitoring", {})
 
@@ -257,6 +259,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "monte_carlo_ruin_drawdown_pct": monte_carlo.get("ruin_drawdown_pct"),
         "monte_carlo_random_seed": monte_carlo.get("random_seed"),
         "monte_carlo_report_dir": monte_carlo.get("report_dir"),
+        "database_auto_create_tables": persistence.get("auto_create_tables"),
         "market_data_source": market_data.get("source"),
         "market_data_channel": market_data.get("channel"),
         "market_data_history_size": market_data.get("history_size"),

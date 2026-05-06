@@ -17,6 +17,7 @@ Run before opening a PR:
 py -m pytest tests/ -q --basetemp C:\Users\Preethve\lwk-futures-Trading-Bot\pytest_tmp
 py -m ruff check .
 py -m mypy app --strict
+py main.py db-current
 npm test --prefix frontend
 npm run build --prefix frontend
 docker compose config
