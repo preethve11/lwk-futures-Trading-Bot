@@ -53,3 +53,11 @@ backtest:
   historical_data_csv: null
   historical_data_dir: null
   report_dir: reports/backtests
+
+market_data:
+  # rest = live strategy loop polls Binance REST.
+  # redis = live strategy loop consumes klines published by `python main.py market-data`.
+  source: rest
+  channel: market_data.kline
+  history_size: 500
+  reconnect_backoff_seconds: 2.0

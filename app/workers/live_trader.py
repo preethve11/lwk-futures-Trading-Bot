@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from app.core.config import Settings
+from app.market_data.provider import MarketDataProvider, RedisMarketDataProvider
 from app.core.security import assert_live_trading_allowed
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
 from app.persistence.repositories import (
@@ -39,11 +40,13 @@ class LiveTrader:
         client: ExecutionClient | None = None,
         session_factory: SessionFactory | None = None,
         alert_queue: AlertQueue | None = None,
+        market_data_provider: MarketDataProvider | None = None,
     ) -> None:
         self.settings = settings
         self.strategy_registry = strategy_registry or create_default_strategy_registry()
         self.client = client
         self.session_factory = session_factory
+        self.market_data_provider = market_data_provider
         self.alert_queue = alert_queue or AlertQueue(
             bot_token=settings.telegram_bot_token,
             chat_id=settings.telegram_chat_id,
@@ -124,7 +127,7 @@ class LiveTrader:
                         time.sleep(1)
                         continue
 
-                    df = client.get_klines(self.settings.symbol, self.settings.timeframe, limit=300)
+                    df = self._get_klines(client, self.settings.symbol, self.settings.timeframe, limit=300)
                     df = strategy.compute_indicators(df)
                     raw = strategy.get_signal(df)
                     if raw is None:
@@ -214,6 +217,26 @@ class LiveTrader:
             self.settings.active_binance_api_secret,
             testnet=self.settings.use_testnet,
         )
+
+    def _get_market_data_provider(self) -> MarketDataProvider | None:
+        if self.market_data_provider is not None:
+            return self.market_data_provider
+        if self.settings.market_data_source != "redis":
+            return None
+        self.market_data_provider = RedisMarketDataProvider.from_url(
+            self.settings.redis_url,
+            history_size=self.settings.market_data_history_size,
+        )
+        return self.market_data_provider
+
+    def _get_klines(self, client: ExecutionClient, symbol: str, interval: str, *, limit: int) -> pd.DataFrame:
+        provider = self._get_market_data_provider()
+        if provider is None:
+            return client.get_klines(symbol, interval, limit=limit)
+        df = provider.get_klines(symbol, interval, limit=limit)
+        if df.empty:
+            raise RuntimeError(f"No Redis market data available for {symbol} {interval}")
+        return df
 
     def _create_risk_manager(self, symbol_info: dict[str, object] | None) -> RiskManager:
         return RiskManager(

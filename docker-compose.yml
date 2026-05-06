@@ -37,6 +37,7 @@ services:
       API_CORS_ORIGINS: '["http://localhost:8080","http://127.0.0.1:8080","http://localhost:5173","http://127.0.0.1:5173"]'
       DATABASE_URL: postgresql+psycopg://trading_bot:trading_bot@postgres:5432/trading_bot
       REDIS_URL: redis://redis:6379/0
+      MARKET_DATA_SOURCE: rest
       USE_TESTNET: "true"
       CONFIRM_LIVE_TRADING: "false"
     ports:
@@ -55,6 +56,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  market-data:
+    profiles: ["market-data"]
+    build:
+      context: .
+    command: ["python", "main.py", "market-data"]
+    environment:
+      APP_ENV: local
+      REDIS_URL: redis://redis:6379/0
+      SYMBOLS: ZECUSDT
+      TIMEFRAME: 5m
+      USE_TESTNET: "true"
+      MARKET_DATA_CHANNEL: market_data.kline
+      MARKET_DATA_HISTORY_SIZE: "500"
+      MARKET_DATA_RECONNECT_BACKOFF_SECONDS: "2"
+    depends_on:
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
