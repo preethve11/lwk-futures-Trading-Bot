@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     ai_journal_model: str = "gpt-4.1-mini"
     ai_journal_timeout_seconds: float = Field(default=15.0, gt=0)
     ai_journal_max_queue_size: int = Field(default=1000, gt=0)
+    metrics_enabled: bool = True
+    metrics_include_database: bool = True
+    metrics_token: str = ""
+    readiness_check_database: bool = True
 
     @field_validator("symbol", mode="before")
     @classmethod
@@ -199,6 +203,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
     monte_carlo = optimization.get("monte_carlo", {})
     market_data = data.get("market_data", {})
     ai_journal = data.get("ai_journal", {})
+    monitoring = data.get("monitoring", {})
 
     values: dict[str, Any] = {
         "use_testnet": api.get("use_testnet"),
@@ -260,5 +265,9 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "ai_journal_model": ai_journal.get("model"),
         "ai_journal_timeout_seconds": ai_journal.get("timeout_seconds"),
         "ai_journal_max_queue_size": ai_journal.get("max_queue_size"),
+        "metrics_enabled": monitoring.get("metrics_enabled"),
+        "metrics_include_database": monitoring.get("metrics_include_database"),
+        "metrics_token": monitoring.get("metrics_token"),
+        "readiness_check_database": monitoring.get("readiness_check_database"),
     }
     return {key: value for key, value in values.items() if value is not None}

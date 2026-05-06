@@ -82,6 +82,9 @@ jobs:
       - name: Compose config
         run: docker compose config
 
+      - name: Monitoring compose config
+        run: docker compose --profile monitoring config
+
   secret-scan:
     name: Gitleaks secret scan
     runs-on: ubuntu-latest
