@@ -54,6 +54,38 @@ export function EventViewer({ data }: { data: DashboardData }) {
           </table>
         </div>
       </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <h2>AI Trade Journal</h2>
+          <span>{data.aiReports.length} reports</span>
+        </div>
+        <div className="table-wrap">
+          <table className="journal-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Symbol</th>
+                <th>Model</th>
+                <th>Report</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.aiReports.map((report) => (
+                <tr key={report.id}>
+                  <td><Badge value={report.event_type} /></td>
+                  <td>{report.symbol}</td>
+                  <td>{report.model}</td>
+                  <td>{report.report_text}</td>
+                  <td>{formatDateTime(report.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.aiReports.length === 0 ? <div className="empty-state">No AI journal reports</div> : null}
+        </div>
+      </section>
     </div>
   );
 }

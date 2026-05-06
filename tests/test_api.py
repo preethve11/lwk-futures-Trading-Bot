@@ -8,7 +8,7 @@ from app.api.main import create_app
 from app.core.config import Settings
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
 from app.persistence.models import PositionModel
-from app.persistence.repositories import BotSessionRepository, RiskEventRepository, SignalRepository, TradeRepository
+from app.persistence.repositories import AIReportRepository, BotSessionRepository, RiskEventRepository, SignalRepository, TradeRepository
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Signal, SignalSide, Trade
 
@@ -103,6 +103,20 @@ def _seed_data(factory: SessionFactory) -> None:
             severity="CRITICAL",
             reason="test",
         )
+        AIReportRepository(session).create(
+            bot_session_id=bot_session.id,
+            signal_id=signal.id,
+            symbol="ZECUSDT",
+            strategy_name="ema_rsi_vwap",
+            event_type="signal_taken",
+            model="fake-model",
+            prompt="prompt",
+            report_text="advisory report",
+            input_snapshot={"side": "BUY"},
+            risk_state={"allowed": True},
+            market_regime={"ema_trend": "bullish"},
+            outcome={"protected": True},
+        )
 
 
 def test_api_rejects_invalid_token() -> None:
@@ -156,6 +170,7 @@ def test_repository_backed_read_endpoints() -> None:
     backtests = client.get("/backtests", headers=_headers())
     positions = client.get("/positions", headers=_headers())
     risk_events = client.get("/risk/events", headers=_headers())
+    ai_reports = client.get("/ai-reports", headers=_headers())
 
     assert trades.status_code == 200
     assert trades.json()[0]["symbol"] == "ZECUSDT"
@@ -171,6 +186,8 @@ def test_repository_backed_read_endpoints() -> None:
     assert positions.json()[0]["status"] == "open"
     assert risk_events.status_code == 200
     assert risk_events.json()[0]["severity"] == "CRITICAL"
+    assert ai_reports.status_code == 200
+    assert ai_reports.json()[0]["report_text"] == "advisory report"
 
 
 def test_sessions_start_stop_and_risk_kill_switch() -> None:

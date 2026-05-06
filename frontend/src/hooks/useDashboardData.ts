@@ -8,6 +8,7 @@ const emptySnapshot: DashboardSnapshot = {
   backtests: [],
   trades: [],
   signals: [],
+  aiReports: [],
   sessions: [],
   positions: [],
   riskState: null,

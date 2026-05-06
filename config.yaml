@@ -78,3 +78,9 @@ market_data:
   channel: market_data.kline
   history_size: 500
   reconnect_backoff_seconds: 2.0
+
+ai_journal:
+  enabled: false
+  model: gpt-4.1-mini
+  timeout_seconds: 15.0
+  max_queue_size: 1000

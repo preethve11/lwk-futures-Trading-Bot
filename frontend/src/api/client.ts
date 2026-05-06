@@ -1,5 +1,6 @@
 import type {
   BacktestRun,
+  AIReport,
   BotSession,
   ConfigSnapshot,
   DashboardSnapshot,
@@ -37,6 +38,7 @@ export const apiClient = {
   getBacktests: () => request<BacktestRun[]>('/backtests'),
   getTrades: () => request<Trade[]>('/trades'),
   getSignals: () => request<Signal[]>('/signals'),
+  getAIReports: () => request<AIReport[]>('/ai-reports'),
   getSessions: () => request<BotSession[]>('/sessions'),
   getPositions: () => request<Position[]>('/positions'),
   getRiskState: () => request<RiskState>('/risk/state'),
@@ -59,18 +61,19 @@ export const apiClient = {
 };
 
 export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
-  const [configs, backtests, trades, signals, sessions, positions, riskState, riskEvents] = await Promise.all([
+  const [configs, backtests, trades, signals, aiReports, sessions, positions, riskState, riskEvents] = await Promise.all([
     apiClient.getConfigs(),
     apiClient.getBacktests(),
     apiClient.getTrades(),
     apiClient.getSignals(),
+    apiClient.getAIReports(),
     apiClient.getSessions(),
     apiClient.getPositions(),
     apiClient.getRiskState(),
     apiClient.getRiskEvents()
   ]);
 
-  return { configs, backtests, trades, signals, sessions, positions, riskState, riskEvents };
+  return { configs, backtests, trades, signals, aiReports, sessions, positions, riskState, riskEvents };
 }
 
 export function connectLiveEvents(onEvent: (event: LiveEvent) => void, onError: () => void): WebSocket | null {

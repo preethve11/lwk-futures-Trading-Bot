@@ -51,6 +51,7 @@ class BotSessionModel(Base):
     trades: Mapped[list[TradeModel]] = relationship(back_populates="bot_session")
     positions: Mapped[list[PositionModel]] = relationship(back_populates="bot_session")
     risk_events: Mapped[list[RiskEventModel]] = relationship(back_populates="bot_session")
+    ai_reports: Mapped[list[AIReportModel]] = relationship(back_populates="bot_session")
 
 
 class ConfigModel(Base):
@@ -103,6 +104,7 @@ class SignalModel(Base):
     bot_session: Mapped[BotSessionModel | None] = relationship(back_populates="signals")
     orders: Mapped[list[OrderModel]] = relationship(back_populates="signal")
     trades: Mapped[list[TradeModel]] = relationship(back_populates="signal")
+    ai_reports: Mapped[list[AIReportModel]] = relationship(back_populates="signal")
 
 
 class OrderModel(Base):
@@ -191,6 +193,7 @@ class TradeModel(Base):
     bot_session: Mapped[BotSessionModel | None] = relationship(back_populates="trades")
     signal: Mapped[SignalModel | None] = relationship(back_populates="trades")
     order: Mapped[OrderModel | None] = relationship(back_populates="trades")
+    ai_reports: Mapped[list[AIReportModel]] = relationship(back_populates="trade")
 
 
 class RiskEventModel(Base):
@@ -234,3 +237,31 @@ class BacktestRunModel(Base):
     expectancy: Mapped[float]
     config_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class AIReportModel(Base):
+    """Advisory-only AI journal report for signal and trade decisions."""
+
+    __tablename__ = "ai_reports"
+    __table_args__ = (Index("ix_ai_reports_symbol_created_at", "symbol", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bot_session_id: Mapped[int | None] = mapped_column(ForeignKey("bot_sessions.id"), nullable=True, index=True)
+    signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id"), nullable=True, index=True)
+    trade_id: Mapped[int | None] = mapped_column(ForeignKey("trades.id"), nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    strategy_name: Mapped[str] = mapped_column(String(120))
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    model: Mapped[str] = mapped_column(String(120))
+    prompt: Mapped[str] = mapped_column(String(4000), default="")
+    report_text: Mapped[str] = mapped_column(String(4000), default="")
+    input_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    risk_state: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    market_regime: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    outcome: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    raw_response: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    bot_session: Mapped[BotSessionModel | None] = relationship(back_populates="ai_reports")
+    signal: Mapped[SignalModel | None] = relationship(back_populates="ai_reports")
+    trade: Mapped[TradeModel | None] = relationship(back_populates="ai_reports")

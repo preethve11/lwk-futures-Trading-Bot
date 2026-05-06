@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.event_bus import LiveEventBus
-from app.api.routers import backtests, configs, positions, risk, sessions, signals, trades, ws
+from app.api.routers import ai_reports, backtests, configs, positions, risk, sessions, signals, trades, ws
 from app.api.schemas import HealthResponse
 from app.core.config import Settings, get_settings
 from app.persistence.database import SessionFactory, create_session_factory, init_db
@@ -42,6 +42,7 @@ def create_app(
         return {"status": "ok"}
 
     app.include_router(configs.router)
+    app.include_router(ai_reports.router)
     app.include_router(backtests.router)
     app.include_router(trades.router)
     app.include_router(positions.router)
