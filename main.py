@@ -8,6 +8,7 @@ Usage:
   python main.py monte-carlo [--config config.yaml]
   python main.py db-upgrade [--config config.yaml]
   python main.py db-current [--config config.yaml]
+  python main.py recover-unprotected [--config config.yaml]
   python main.py live [--config config.yaml]
   python main.py api [--config config.yaml]
   python main.py market-data [--config config.yaml]
@@ -38,12 +39,14 @@ from app.market_data.redis_store import RedisKlineStore
 from app.persistence.database import create_session_factory, init_db, session_scope
 from app.persistence.repositories import TradeRepository
 from app.strategies.registry import create_default_strategy_registry
+from app.workers.failed_unprotected_recovery import FailedUnprotectedRecoveryWorker
 from app.workers.live_trader import LiveTrader
 from trading_bot.backtesting.engine import BacktestEngine, BacktestRecorder, BacktestResult
 from trading_bot.core.config import load_config
 from trading_bot.core.logger import setup_logging
 from trading_bot.execution.binance_futures import BinanceFuturesClient
 from trading_bot.risk.manager import RiskManager
+from trading_bot.utils.alerts import AlertQueue
 
 
 def run_backtest(config_path: Path | None) -> int:
@@ -415,6 +418,47 @@ def run_db_current(config_path: Path | None) -> int:
     return 0
 
 
+def run_recover_unprotected(config_path: Path | None, limit: int) -> int:
+    """Recover persisted failed-unprotected orders with verification and emergency close."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    logger = logging.getLogger("trading_bot.failed_unprotected_recovery")
+    if not settings.active_binance_api_key or not settings.active_binance_api_secret:
+        logger.error("Recovery needs active Binance API keys")
+        return 1
+
+    session_factory = create_session_factory(settings.database_url)
+    try:
+        init_db(session_factory)
+    except Exception as exc:
+        logger.exception("Could not initialize persistence database", extra={"error": str(exc)})
+
+    alert_queue = AlertQueue(
+        bot_token=settings.telegram_bot_token,
+        chat_id=settings.telegram_chat_id,
+    )
+    try:
+        worker = FailedUnprotectedRecoveryWorker(
+            session_factory=session_factory,
+            client=BinanceFuturesClient(
+                settings.active_binance_api_key,
+                settings.active_binance_api_secret,
+                testnet=settings.use_testnet,
+            ),
+            alert_queue=alert_queue,
+        )
+        summary = worker.recover_once(limit=limit)
+        print("\n--- Failed Unprotected Recovery ---")
+        print(f"Scanned: {summary.scanned}")
+        print(f"Recovered protection: {summary.recovered}")
+        print(f"Emergency closed: {summary.emergency_closed}")
+        print(f"Manual review: {summary.manual_review}")
+        print(f"Errors: {len(summary.errors)}")
+        return 1 if summary.errors else 0
+    finally:
+        alert_queue.stop(drain=True)
+
+
 def _alembic_config(database_url: str):
     from alembic.config import Config as AlembicConfig
 
@@ -455,11 +499,15 @@ def main() -> int:
             "monte-carlo",
             "db-upgrade",
             "db-current",
+            "recover-unprotected",
             "live",
             "api",
             "market-data",
         ],
-        help="Run backtest, backtest-multi, walk-forward, monte-carlo, db-upgrade, db-current, live, api, or market-data",
+        help=(
+            "Run backtest, backtest-multi, walk-forward, monte-carlo, db-upgrade, db-current, "
+            "recover-unprotected, live, api, or market-data"
+        ),
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
     parser.add_argument("--host", default="127.0.0.1", help="API host")
@@ -472,6 +520,7 @@ def main() -> int:
     parser.add_argument("--horizon-trades", type=int, default=None, help="Monte Carlo forward trade horizon")
     parser.add_argument("--ruin-drawdown-pct", type=float, default=None, help="Monte Carlo ruin threshold as drawdown percent")
     parser.add_argument("--revision", default="head", help="Alembic revision for db-upgrade")
+    parser.add_argument("--limit", type=int, default=100, help="Maximum failed-unprotected orders to recover")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
@@ -492,6 +541,8 @@ def main() -> int:
         return run_db_upgrade(args.config, args.revision)
     if args.mode == "db-current":
         return run_db_current(args.config)
+    if args.mode == "recover-unprotected":
+        return run_recover_unprotected(args.config, args.limit)
     if args.mode == "api":
         import uvicorn
 

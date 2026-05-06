@@ -175,6 +175,20 @@ class OrderRepository:
         statement = select(OrderModel).where(OrderModel.state == state).order_by(OrderModel.created_at.asc())
         return list(self.session.scalars(statement))
 
+    def list_unprotected_for_recovery(self, *, limit: int = 100) -> list[OrderModel]:
+        statement = (
+            select(OrderModel)
+            .where(
+                (OrderModel.state == OrderLifecycleState.FAILED_UNPROTECTED)
+                | (OrderModel.requires_manual_review.is_(True))
+            )
+            .where(OrderModel.protected.is_(False))
+            .where(OrderModel.emergency_close_order_id.is_(None))
+            .order_by(OrderModel.created_at.asc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
+
     def _get(self, order_id: int) -> OrderModel:
         model = self.session.get(OrderModel, order_id)
         if model is None:
