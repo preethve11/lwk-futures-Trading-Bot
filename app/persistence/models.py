@@ -125,7 +125,10 @@ class OrderModel(Base):
     side: Mapped[str] = mapped_column(String(12), index=True)
     order_type: Mapped[str] = mapped_column(String(32), default="MARKET")
     state: Mapped[OrderLifecycleState] = mapped_column(default=OrderLifecycleState.PENDING, index=True)
+    exchange_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     quantity: Mapped[float | None] = mapped_column(nullable=True)
+    filled_quantity: Mapped[float | None] = mapped_column(nullable=True)
+    remaining_quantity: Mapped[float | None] = mapped_column(nullable=True)
     avg_price: Mapped[float | None] = mapped_column(nullable=True)
     stop_order_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     take_profit_order_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -137,6 +140,7 @@ class OrderModel(Base):
     reduce_only: Mapped[bool] = mapped_column(default=False)
     message: Mapped[str] = mapped_column(String(500), default="")
     raw_response: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

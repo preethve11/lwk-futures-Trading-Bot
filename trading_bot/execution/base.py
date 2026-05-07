@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List, Optional
 
 import pandas as pd
@@ -31,6 +32,25 @@ class OrderResult:
     quantity: Optional[float] = None
     message: str = ""
     protected_order: Optional[ProtectedOrderResult] = None
+
+
+@dataclass(frozen=True)
+class ExchangeOrderStatus:
+    """Normalized exchange order status for lifecycle reconciliation."""
+
+    order_id: str
+    symbol: str
+    status: str
+    order_type: str = ""
+    side: str = ""
+    price: Optional[float] = None
+    stop_price: Optional[float] = None
+    original_quantity: Optional[float] = None
+    executed_quantity: Optional[float] = None
+    avg_price: Optional[float] = None
+    reduce_only: bool = False
+    update_time: Optional[datetime] = None
+    raw_response: dict[str, object] = field(default_factory=dict)
 
 
 class ExecutionClient(ABC):
@@ -83,3 +103,11 @@ class ExecutionClient(ABC):
     def fetch_recent_trades(self, symbol: str, limit: int = 100) -> List[dict[str, object]]:
         """Optional: recent trades for PnL reconciliation. Default empty."""
         return []
+
+    def get_order_status(self, symbol: str, order_id: str) -> ExchangeOrderStatus | None:
+        """Optional: return a normalized order status for lifecycle reconciliation."""
+        return None
+
+    def cancel_order(self, symbol: str, order_id: str) -> OrderResult:
+        """Optional: cancel a single exchange order."""
+        return OrderResult(success=False, order_id=order_id, message="cancel_order is not supported")

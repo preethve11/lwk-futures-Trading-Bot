@@ -53,6 +53,10 @@ def test_alembic_upgrade_head_creates_current_schema(tmp_path: Path) -> None:
         "protected",
         "requires_manual_review",
         "emergency_close_order_id",
+        "exchange_status",
+        "filled_quantity",
+        "remaining_quantity",
+        "last_reconciled_at",
     }.issubset(order_columns)
     assert {
         "exchange_trade_id",
