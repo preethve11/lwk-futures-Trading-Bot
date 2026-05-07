@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 import math
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any, Optional
 
 
-def parse_symbol_filters(symbol_info: Optional[dict]) -> tuple[float, float, float]:
+def parse_symbol_filters(symbol_info: Optional[Mapping[str, Any]]) -> tuple[float, float, float]:
     """
     Extract min_qty, step_size (lot_step), tick_size from symbol filters.
     Returns (min_qty, lot_step, price_tick). Uses defaults if symbol_info is None.
@@ -15,12 +16,17 @@ def parse_symbol_filters(symbol_info: Optional[dict]) -> tuple[float, float, flo
     price_tick = 0.01
     if not symbol_info:
         return min_qty, lot_step, price_tick
-    for f in symbol_info.get("filters", []):
-        if f.get("filterType") == "LOT_SIZE":
-            min_qty = float(f.get("minQty", min_qty))
-            lot_step = float(f.get("stepSize", lot_step))
-        if f.get("filterType") == "PRICE_FILTER":
-            price_tick = float(f.get("tickSize", price_tick))
+    filters = symbol_info.get("filters", [])
+    if not isinstance(filters, list):
+        return min_qty, lot_step, price_tick
+    for item in filters:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("filterType") == "LOT_SIZE":
+            min_qty = float(item.get("minQty", min_qty))
+            lot_step = float(item.get("stepSize", lot_step))
+        if item.get("filterType") == "PRICE_FILTER":
+            price_tick = float(item.get("tickSize", price_tick))
     return min_qty, lot_step, price_tick
 
 

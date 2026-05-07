@@ -8,6 +8,7 @@ from app.strategies.registry import StrategyRegistry, create_default_strategy_re
 from trading_bot.core.types import Signal
 from trading_bot.strategies.base import BaseStrategy
 from trading_bot.strategies.ema_rsi_vwap import EmaRsiVwapStrategy
+from trading_bot.strategies.session_breakout import SessionBreakoutStrategy
 
 
 def test_default_registry_creates_ema_rsi_vwap_strategy() -> None:
@@ -19,6 +20,16 @@ def test_default_registry_creates_ema_rsi_vwap_strategy() -> None:
     assert isinstance(strategy, EmaRsiVwapStrategy)
     assert strategy.ema_fast == 4
     assert strategy.ema_slow == 10
+
+
+def test_default_registry_creates_session_breakout_strategy() -> None:
+    settings = Settings(strategy_name="session_breakout", timeframe="15m")
+    registry = create_default_strategy_registry()
+
+    strategy = registry.create("session-breakout", settings)
+
+    assert isinstance(strategy, SessionBreakoutStrategy)
+    assert strategy.timeframe == "15m"
 
 
 def test_registry_rejects_duplicate_names() -> None:

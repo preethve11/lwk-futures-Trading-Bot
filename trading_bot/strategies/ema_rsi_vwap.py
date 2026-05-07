@@ -5,7 +5,7 @@ Uses closed candle only (iloc[-2]) to avoid repainting.
 
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -77,7 +77,7 @@ class EmaRsiVwapStrategy(BaseStrategy):
         df["vol_ma"] = df["volume"].rolling(self.vol_ma_len).mean()
         return df
 
-    def get_signal(self, df: pd.DataFrame, **kwargs: Any) -> Optional[Signal]:
+    def get_signal(self, df: pd.DataFrame, **kwargs: object) -> Optional[Signal]:
         """
         Uses last closed bar (iloc[-2]) to avoid repainting.
         Returns raw signal with quantity=0; caller must set quantity via risk manager.
@@ -94,13 +94,23 @@ class EmaRsiVwapStrategy(BaseStrategy):
         vol = float(last["volume"])
         vol_ma = float(last["vol_ma"]) if not pd.isna(last["vol_ma"]) else vol
         vol_spike = vol > (vol_ma * self.vol_mult)
-        if atr <= 0 or not vol_spike:
+        if atr <= 0:
+            self.record_rejection("other")
+            return None
+        if not vol_spike:
+            self.record_rejection("volume_too_low")
             return None
         ema_bull = ema_f > ema_s
         ema_bear = ema_f < ema_s
-        long_ok = ema_bull and close > vwap and rsi > self.rsi_long_min
-        short_ok = ema_bear and close < vwap and rsi < self.rsi_short_max
+        long_trend = ema_bull and close > vwap
+        short_trend = ema_bear and close < vwap
+        if not (long_trend or short_trend):
+            self.record_rejection("no_trend_confirmation")
+            return None
+        long_ok = long_trend and rsi > self.rsi_long_min
+        short_ok = short_trend and rsi < self.rsi_short_max
         if not (long_ok or short_ok):
+            self.record_rejection("rsi_filter")
             return None
         side = SignalSide.LONG if long_ok else SignalSide.SHORT
         stop = close - atr * self.atr_stop_mult if side == SignalSide.LONG else close + atr * self.atr_stop_mult

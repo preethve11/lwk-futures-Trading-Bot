@@ -9,7 +9,7 @@ from functools import wraps
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import pandas as pd
 
@@ -34,7 +34,7 @@ def retry_on_rate_limit(max_retries: int = 3, base_delay: float = 1.0) -> Callab
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(f)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
-            last_exc = None
+            last_exc: BaseException | None = None
             for attempt in range(max_retries):
                 try:
                     return f(*args, **kwargs)
@@ -46,7 +46,9 @@ def retry_on_rate_limit(max_retries: int = 3, base_delay: float = 1.0) -> Callab
                         time.sleep(delay)
                     else:
                         raise
-            raise last_exc
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError("rate-limit retry exhausted without an exception")
         return wrapped
     return decorator
 
@@ -66,7 +68,7 @@ class BinanceFuturesClient(ExecutionClient):
             logger.info("Binance Futures: using TESTNET")
         else:
             logger.info("Binance Futures: using LIVE")
-        self._symbol_info_cache: dict[str, dict] = {}
+        self._symbol_info_cache: dict[str, dict[str, object]] = {}
 
     @retry_on_rate_limit(max_retries=3, base_delay=1.0)
     def get_klines(self, symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
@@ -80,19 +82,23 @@ class BinanceFuturesClient(ExecutionClient):
         return df[["time", "open", "high", "low", "close", "volume"]]
 
     @retry_on_rate_limit(max_retries=2)
-    def get_symbol_info(self, symbol: str, *, force_refresh: bool = False) -> Optional[dict]:
+    def get_symbol_info(self, symbol: str, *, force_refresh: bool = False) -> Optional[dict[str, object]]:
         if not force_refresh and symbol in self._symbol_info_cache:
             return self._symbol_info_cache[symbol]
-        info = self._client.futures_exchange_info()
-        for s in info.get("symbols", []):
-            if s.get("symbol") == symbol:
-                self._symbol_info_cache[symbol] = s
-                return s
+        info = cast(dict[str, object], self._client.futures_exchange_info())
+        symbols = info.get("symbols", [])
+        if not isinstance(symbols, list):
+            return None
+        for item in symbols:
+            if isinstance(item, dict) and item.get("symbol") == symbol:
+                parsed = dict(item)
+                self._symbol_info_cache[symbol] = parsed
+                return parsed
         return None
 
-    def refresh_symbol_info(self, symbol: str) -> Optional[dict]:
+    def refresh_symbol_info(self, symbol: str) -> Optional[dict[str, object]]:
         """Force refresh cached symbol filters after an exchange-side error."""
-        return self.get_symbol_info(symbol, force_refresh=True)
+        return cast(Optional[dict[str, object]], self.get_symbol_info(symbol, force_refresh=True))
 
     @retry_on_rate_limit(max_retries=2)
     def get_open_position(self, symbol: str) -> Optional[Position]:
@@ -187,7 +193,10 @@ class BinanceFuturesClient(ExecutionClient):
 
     @retry_on_rate_limit(max_retries=2)
     def get_open_orders(self, symbol: str) -> list[dict[str, object]]:
-        return list(self._client.futures_get_open_orders(symbol=symbol))
+        raw = self._client.futures_get_open_orders(symbol=symbol)
+        if not isinstance(raw, list):
+            return []
+        return [dict(item) for item in raw if isinstance(item, dict)]
 
     @retry_on_rate_limit(max_retries=2)
     def emergency_close_position(self, symbol: str, side: SignalSide, quantity: float) -> OrderResult:
@@ -211,9 +220,12 @@ class BinanceFuturesClient(ExecutionClient):
             logger.exception("Emergency close failed: %s", e)
             return OrderResult(success=False, quantity=quantity, message=str(e))
 
-    def fetch_recent_trades(self, symbol: str, limit: int = 100) -> list[dict]:
+    def fetch_recent_trades(self, symbol: str, limit: int = 100) -> list[dict[str, object]]:
         try:
-            return self._client.futures_account_trades(symbol=symbol, limit=limit)
+            raw = self._client.futures_account_trades(symbol=symbol, limit=limit)
+            if not isinstance(raw, list):
+                return []
+            return [dict(item) for item in raw if isinstance(item, dict)]
         except Exception as e:
             logger.exception("fetch_recent_trades: %s", e)
             return []

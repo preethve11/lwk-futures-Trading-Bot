@@ -9,6 +9,7 @@ This repository is built for research, testnet operation, and engineering portfo
 ## What Is Included
 
 - EMA/RSI/VWAP/volume scalping strategy with ATR stops and take-profits.
+- Session-open breakout strategy for NSE, London, and New York opens with 2-hour pre-session range, EMA(50), ADX, range-width gates, and rejected-signal diagnostics.
 - Strict risk controls: fixed dollar risk, daily loss lock, drawdown lock, risk-reward checks, min notional, manual pause, and kill switch.
 - Binance Futures execution client with symbol-info caching and live trading guard.
 - Order protection state machine and reconciliation worker for SL/TP verification and emergency close.
@@ -142,6 +143,12 @@ Full guide: [docs/testnet-quickstart.md](docs/testnet-quickstart.md)
 # Backtest
 py main.py backtest
 
+# Session-open breakout research run. 5m is disabled by default; use 15m or 1h.
+py main.py backtest --strategy session_breakout --symbol ZECUSDT --timeframe 1h --add-regime-labels --show-rejected
+
+# Inspect rejection reasons from the latest backtest
+py main.py rejected-signals reports/latest/rejected_signals.json
+
 # Multi-symbol backtest, using SYMBOLS from env or config.yaml
 py main.py backtest-multi --report-json reports/backtests/multi.json
 
@@ -153,6 +160,12 @@ py main.py monte-carlo --returns-json reports/backtests/example.json --report-js
 
 # Explain strategy losses from a generated trade log
 py main.py strategy-research --trades-csv reports/paper_validation/run_id/trade_log.csv
+
+# Include regime/session/filter diagnostics from the latest backtest artifacts
+py main.py strategy-research reports/latest/trade_log.csv --group-by-regime
+
+# Compare baseline and filtered variants side by side
+py main.py strategy-compare --baseline ema_rsi_vwap --variants ema_rsi_vwap_trend_only ema_rsi_vwap_high_vol ema_rsi_vwap_combined --symbols ZECUSDT BTCUSDT ETHUSDT --timeframes 1h 15m
 
 # API
 py main.py api --host 127.0.0.1 --port 8000
@@ -222,8 +235,12 @@ Reports include Sharpe, Sortino, max drawdown, win rate, profit factor, average 
 
 `strategy-research` consumes a paper-validation `trade_log.csv` and explains losses by symbol, timeframe, market condition, hour-of-day, exit reason, transaction-cost drag, and outlier concentration. It is designed to answer whether a bad run is driven by 5m noise, costs, broad negative expectancy, or a small number of large losses.
 
+For the session-open breakout workflow, keep 5m disabled until it proves positive out-of-sample expectancy. Start with 15m and 1h, inspect `reports/latest/rejected_signals.json`, then use `strategy-research --group-by-regime` to review performance by session, range-width bucket, EMA alignment, and ADX bucket.
+
 Example report: [docs/example-backtest-report.md](docs/example-backtest-report.md)
 Strategy research guide: [docs/strategy-research.md](docs/strategy-research.md)
+Session breakout diagnostics: [docs/session-breakout-diagnostics.md](docs/session-breakout-diagnostics.md)
+Strategy comparison workflow: [docs/strategy-comparison.md](docs/strategy-comparison.md)
 
 ## Deployment
 

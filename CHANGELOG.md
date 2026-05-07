@@ -4,6 +4,8 @@ All notable changes are tracked here.
 
 ## Unreleased
 
+- Add config-driven `session_breakout` strategy with NSE/London/New York session opens, 2-hour pre-session range, 5m-disabled default, minimum range-width gate, EMA(50) regime filter, ADX chop filter, rejected-signal diagnostics, and SL/TP research columns.
+- Add rejected-signal JSON artifacts, intended-vs-actual exit diagnostics, regime/session/filter breakdowns in strategy research, and strategy comparison reporting.
 - Add `strategy-research` diagnostics for trade distribution, timeframe cost drag, outlier concentration, and direct losing-strategy root-cause analysis.
 - Add strategy performance gate for live promotion, mainnet enforcement, API/dashboard visibility, CLI smoke, and tests.
 - Fix backtest trade logs to record actual entry timestamps instead of `datetime.min`.

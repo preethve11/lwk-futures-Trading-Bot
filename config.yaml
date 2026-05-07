@@ -5,10 +5,10 @@ api:
   use_testnet: true
 
 strategy:
-  name: ema_rsi_vwap
+  name: session_breakout
   symbol: ZECUSDT
   symbols: [ZECUSDT]
-  timeframe: 5m
+  timeframe: 1h
   ema_fast: 9
   ema_slow: 21
   rsi_len: 7
@@ -21,6 +21,16 @@ strategy:
   rsi_long_min: 48
   rsi_short_max: 52
   cooldown_candles: 1
+  # Session-open breakout diagnostics strategy. 5m is deliberately disabled until it proves edge out of sample.
+  session_breakout_sessions: ["nse:03:45", "london:08:00", "new_york:14:30"]
+  session_breakout_pre_open_minutes: 120
+  session_breakout_trade_window_minutes: 240
+  session_breakout_min_range_width_pct: 0.4
+  session_breakout_ema_length: 50
+  session_breakout_adx_length: 14
+  session_breakout_min_adx: 20.0
+  session_breakout_entry_buffer_pct: 0.0
+  session_breakout_enabled_timeframes: ["15m", "1h"]
 
 risk:
   risk_per_trade_usd: 10.0

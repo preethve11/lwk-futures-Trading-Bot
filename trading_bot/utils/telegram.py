@@ -3,7 +3,7 @@
 from __future__ import annotations
 import logging
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 logger = logging.getLogger("trading_bot.utils.telegram")
 

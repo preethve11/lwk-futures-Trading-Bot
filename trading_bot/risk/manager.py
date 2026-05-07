@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from trading_bot.core.types import SignalSide
 from trading_bot.utils.exchange_filters import round_quantity, parse_symbol_filters
@@ -39,7 +39,7 @@ class RiskManager:
         min_risk_reward: float,
         use_atr_position_cap: bool = True,
         trailing_stop_atr_mult: float = 0.0,
-        symbol_info: Optional[dict] = None,
+        symbol_info: Optional[dict[str, Any]] = None,
     ):
         self.risk_per_trade_usd = risk_per_trade_usd
         self.max_daily_loss_usd = max_daily_loss_usd
@@ -160,6 +160,6 @@ class RiskManager:
 
         return RiskResult(allowed=True, quantity=qty, reason="")
 
-    def update_symbol_info(self, symbol_info: Optional[dict]) -> None:
+    def update_symbol_info(self, symbol_info: Optional[dict[str, Any]]) -> None:
         """Update lot/price filters when symbol or exchange info changes."""
         self._min_qty, self._lot_step, self._price_tick = parse_symbol_filters(symbol_info)

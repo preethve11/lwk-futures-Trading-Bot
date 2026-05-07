@@ -4,13 +4,17 @@ Backtest engine: no lookahead, closed bar only, slippage and fee simulation.
 
 from __future__ import annotations
 
+import csv
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, List, Optional
+from pathlib import Path
+from typing import Callable, List, Optional, cast
 
 import pandas as pd
 
+from trading_bot.analytics.regime import add_regime_labels
 from trading_bot.analytics.metrics import PerformanceMetrics, compute_metrics
 from trading_bot.core.types import SignalSide, Trade
 from trading_bot.risk.manager import RiskManager
@@ -26,6 +30,60 @@ class BacktestResult:
     trades: List[Trade] = field(default_factory=list)
     equity_curve: List[float] = field(default_factory=list)
     metrics: Optional[PerformanceMetrics] = None
+    rejected_signals: dict[str, int] = field(default_factory=dict)
+    executed_signals: int = 0
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+
+    @property
+    def total_signals_evaluated(self) -> int:
+        """Return all executed and rejected signal outcomes."""
+        return self.executed_signals + sum(self.rejected_signals.values())
+
+    @property
+    def rejection_rate(self) -> float:
+        """Return rejected outcomes divided by all signal outcomes."""
+        total = self.total_signals_evaluated
+        if total <= 0:
+            return 0.0
+        return sum(self.rejected_signals.values()) / total
+
+    def rejected_signal_summary(self) -> dict[str, object]:
+        """Return a JSON-serializable rejected-signal summary."""
+        period = ""
+        if self.period_start is not None and self.period_end is not None:
+            period = f"{self.period_start.isoformat()} to {self.period_end.isoformat()}"
+        return {
+            "period": period,
+            "total_signals_evaluated": self.total_signals_evaluated,
+            "executed_trades": len(self.trades),
+            "executed_signals": self.executed_signals,
+            "rejection_rate": self.rejection_rate,
+            "rejections": self.rejected_signals,
+        }
+
+
+@dataclass
+class OpenBacktestPosition:
+    """Open simulated position state."""
+
+    side: SignalSide
+    entry_price: float
+    quantity: float
+    stop_price: float
+    take_profit_price: float
+    entry_time: datetime
+    entry_index: int
+    volatility_regime: str = ""
+    trend_regime: str = ""
+    volume_regime: str = ""
+    range_width_pct: float = 0.0
+    ema_50: float = 0.0
+    adx_14: float = 0.0
+    intended_sl_pct: float = 0.0
+    intended_tp_pct: float = 0.0
+    session_name: str = ""
+    session_open_time_utc: str = ""
 
 
 BacktestRecorder = Callable[[BacktestResult, str, str | datetime | None, str | datetime | None], None]
@@ -45,6 +103,7 @@ class BacktestEngine:
         slippage_bps: float = 5.0,
         fee_bps: float = 4.0,
         recorder: BacktestRecorder | None = None,
+        add_regime_labels_to_trades: bool = False,
     ):
         self.strategy = strategy
         self.risk_manager = risk_manager
@@ -52,6 +111,7 @@ class BacktestEngine:
         self.slippage_bps = slippage_bps
         self.fee_bps = fee_bps
         self.recorder = recorder
+        self.add_regime_labels_to_trades = add_regime_labels_to_trades
 
     @staticmethod
     def _filter_date_range(
@@ -91,12 +151,15 @@ class BacktestEngine:
         """
         df = self._filter_date_range(df, start_date, end_date)
         df = self.strategy.compute_indicators(df)
+        if self.add_regime_labels_to_trades:
+            df = add_regime_labels(df)
+        self.strategy.reset_signal_tracking()
         capital = self.initial_capital
         self.risk_manager.set_equity(capital)
         self.risk_manager.set_daily_loss(0.0)
         equity_curve = [capital]
         trades: List[Trade] = []
-        open_pos: Optional[tuple[SignalSide, float, float, float, float, datetime, int]] = None
+        open_pos: Optional[OpenBacktestPosition] = None
         cooldown_bars = 0
         last_bar_date = None
         min_bars = max(
@@ -116,7 +179,12 @@ class BacktestEngine:
             slip_mult = 1 + self.slippage_bps / 10000.0
 
             if open_pos is not None:
-                side, entry_price, qty, stop, tp, entry_time, _ = open_pos
+                side = open_pos.side
+                entry_price = open_pos.entry_price
+                qty = open_pos.quantity
+                stop = open_pos.stop_price
+                tp = open_pos.take_profit_price
+                entry_time = open_pos.entry_time
                 exit_price = None
                 exit_reason = ""
                 if side == SignalSide.LONG:
@@ -139,6 +207,8 @@ class BacktestEngine:
                     pnl = (exit_price_adj - entry_price) * qty if side == SignalSide.LONG else (entry_price - exit_price_adj) * qty
                     pnl -= fee
                     pnl_pct = (pnl / (qty * entry_price)) * 100
+                    target_approach_pct = _target_approach_pct(df, open_pos, i)
+                    premature_stop = _premature_stop(df, open_pos, i) if exit_reason == "stop_loss" else False
                     capital += pnl
                     self.risk_manager.set_equity(capital)
                     self.risk_manager.record_trade_pnl(pnl)
@@ -156,6 +226,21 @@ class BacktestEngine:
                             exit_reason=exit_reason,
                             fees=fee,
                             slippage_usd=0.0,
+                            intended_stop_loss=stop,
+                            intended_take_profit=tp,
+                            exit_slippage=exit_price_adj - exit_price,
+                            premature_stop=premature_stop,
+                            target_approach_pct=target_approach_pct,
+                            volatility_regime=open_pos.volatility_regime,
+                            trend_regime=open_pos.trend_regime,
+                            volume_regime=open_pos.volume_regime,
+                            range_width_pct=open_pos.range_width_pct,
+                            ema_50=open_pos.ema_50,
+                            adx_14=open_pos.adx_14,
+                            intended_sl_pct=open_pos.intended_sl_pct,
+                            intended_tp_pct=open_pos.intended_tp_pct,
+                            session_name=open_pos.session_name,
+                            session_open_time_utc=open_pos.session_open_time_utc,
                         )
                     )
                     equity_curve.append(capital)
@@ -163,10 +248,12 @@ class BacktestEngine:
                     continue
 
             if open_pos is not None:
+                self.strategy.record_rejection("existing_position")
                 equity_curve.append(capital)
                 continue
 
             if cooldown_bars > 0:
+                self.strategy.record_rejection("other")
                 cooldown_bars -= 1
                 equity_curve.append(capital)
                 continue
@@ -180,7 +267,7 @@ class BacktestEngine:
             prev = df.iloc[i - 1]
             entry_price = raw_signal.entry_price
             atr = float(prev["atr"]) if not pd.isna(prev.get("atr")) else 0.0
-            result = self.risk_manager.validate_signal(
+            risk_result = self.risk_manager.validate_signal(
                 entry_price,
                 raw_signal.stop_price,
                 raw_signal.take_profit_price,
@@ -188,22 +275,46 @@ class BacktestEngine:
                 atr,
                 capital,
             )
-            if not result.allowed or result.quantity <= 0:
+            if not risk_result.allowed or risk_result.quantity <= 0:
+                self.strategy.record_rejection("risk_limit")
                 equity_curve.append(capital)
                 continue
 
-            qty = result.quantity
+            qty = risk_result.quantity
             entry_adj = entry_price * slip_mult if raw_signal.side == SignalSide.LONG else entry_price / slip_mult
-            open_pos = (raw_signal.side, entry_adj, qty, raw_signal.stop_price, raw_signal.take_profit_price, bar_time, i)
+            self.strategy.record_executed_signal()
+            open_pos = OpenBacktestPosition(
+                side=raw_signal.side,
+                entry_price=entry_adj,
+                quantity=qty,
+                stop_price=raw_signal.stop_price,
+                take_profit_price=raw_signal.take_profit_price,
+                entry_time=bar_time,
+                entry_index=i,
+                volatility_regime=_bar_label(bar, "volatility_regime"),
+                trend_regime=_bar_label(bar, "trend_regime"),
+                volume_regime=_bar_label(bar, "volume_regime"),
+                range_width_pct=_metadata_float(raw_signal.metadata, "range_width_pct"),
+                ema_50=_metadata_float(raw_signal.metadata, "ema_50"),
+                adx_14=_metadata_float(raw_signal.metadata, "adx_14"),
+                intended_sl_pct=_metadata_float(raw_signal.metadata, "intended_sl_pct"),
+                intended_tp_pct=_metadata_float(raw_signal.metadata, "intended_tp_pct"),
+                session_name=_metadata_str(raw_signal.metadata, "session_name"),
+                session_open_time_utc=_metadata_str(raw_signal.metadata, "session_open_time_utc"),
+            )
             cooldown_bars = getattr(self.strategy, "cooldown_candles", 1) if hasattr(self.strategy, "cooldown_candles") else 1
             equity_curve.append(capital)
 
         if open_pos is not None and len(df) > 0:
-            side, entry_price, qty, _, _, entry_time, _ = open_pos
+            side = open_pos.side
+            entry_price = open_pos.entry_price
+            qty = open_pos.quantity
+            entry_time = open_pos.entry_time
             last_close = float(df.iloc[-1]["close"])
             pnl = (last_close - entry_price) * qty if side == SignalSide.LONG else (entry_price - last_close) * qty
             fee = 2 * (qty * entry_price) * (self.fee_bps / 10000.0)
             pnl -= fee
+            target_approach_pct = _target_approach_pct(df, open_pos, len(df) - 1)
             capital += pnl
             trades.append(
                 Trade(
@@ -218,6 +329,20 @@ class BacktestEngine:
                     exit_time=df.iloc[-1]["time"],
                     exit_reason="end_of_data",
                     fees=fee,
+                    intended_stop_loss=open_pos.stop_price,
+                    intended_take_profit=open_pos.take_profit_price,
+                    exit_slippage=0.0,
+                    target_approach_pct=target_approach_pct,
+                    volatility_regime=open_pos.volatility_regime,
+                    trend_regime=open_pos.trend_regime,
+                    volume_regime=open_pos.volume_regime,
+                    range_width_pct=open_pos.range_width_pct,
+                    ema_50=open_pos.ema_50,
+                    adx_14=open_pos.adx_14,
+                    intended_sl_pct=open_pos.intended_sl_pct,
+                    intended_tp_pct=open_pos.intended_tp_pct,
+                    session_name=open_pos.session_name,
+                    session_open_time_utc=open_pos.session_open_time_utc,
                 )
             )
             equity_curve.append(capital)
@@ -227,7 +352,215 @@ class BacktestEngine:
         for pnl in pnls:
             cum.append(cum[-1] + pnl)
         metrics = compute_metrics(pnls, cumulative_returns=[value / self.initial_capital for value in cum])
-        result = BacktestResult(trades=trades, equity_curve=equity_curve, metrics=metrics)
+        result = BacktestResult(
+            trades=trades,
+            equity_curve=equity_curve,
+            metrics=metrics,
+            rejected_signals=self.strategy.rejected_signals,
+            executed_signals=self.strategy.executed_signals,
+            period_start=_to_datetime(df.iloc[0]["time"]) if len(df) else None,
+            period_end=_to_datetime(df.iloc[-1]["time"]) if len(df) else None,
+        )
         if self.recorder is not None:
             self.recorder(result, symbol, start_date, end_date)
         return result
+
+
+class BacktestArtifactExporter:
+    """Export backtest diagnostics for strategy research."""
+
+    TRADE_FIELDS = [
+        "run",
+        "symbol",
+        "timeframe",
+        "market_condition",
+        "side",
+        "quantity",
+        "entry_price",
+        "exit_price",
+        "intended_stop_loss",
+        "intended_take_profit",
+        "exit_slippage",
+        "entry_time",
+        "exit_time",
+        "duration_minutes",
+        "pnl",
+        "pnl_pct",
+        "fees",
+        "slippage_usd",
+        "exit_reason",
+        "premature_stop",
+        "target_approach_pct",
+        "volatility_regime",
+        "trend_regime",
+        "volume_regime",
+        "signal_rejected_reason",
+        "range_width_pct",
+        "ema_50",
+        "adx_14",
+        "intended_sl_pct",
+        "intended_tp_pct",
+        "session_name",
+        "session_open_time_utc",
+    ]
+
+    @classmethod
+    def write_trade_log(
+        cls,
+        result: BacktestResult,
+        path: Path,
+        *,
+        run_name: str = "",
+        timeframe: str = "",
+        market_condition: str = "",
+    ) -> Path:
+        """Write closed trades to a CSV compatible with strategy-research."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=cls.TRADE_FIELDS)
+            writer.writeheader()
+            for trade in result.trades:
+                writer.writerow(_trade_row(trade, run_name, timeframe, market_condition))
+        return path
+
+    @staticmethod
+    def write_rejected_signals(result: BacktestResult, path: Path) -> Path:
+        """Write rejected-signal counters to JSON."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(result.rejected_signal_summary(), indent=2), encoding="utf-8")
+        return path
+
+    @classmethod
+    def write_latest(
+        cls,
+        result: BacktestResult,
+        output_dir: Path,
+        *,
+        run_name: str = "",
+        timeframe: str = "",
+    ) -> tuple[Path, Path]:
+        """Write standard latest backtest artifacts and return trade/rejection paths."""
+        trade_log = cls.write_trade_log(result, output_dir / "trade_log.csv", run_name=run_name, timeframe=timeframe)
+        rejected = cls.write_rejected_signals(result, output_dir / "rejected_signals.json")
+        return trade_log, rejected
+
+
+def _trade_row(trade: Trade, run_name: str, timeframe: str, market_condition: str) -> dict[str, object]:
+    condition = market_condition or _market_condition(
+        trade.volatility_regime,
+        trade.trend_regime,
+        trade.volume_regime,
+    )
+    run = run_name or (f"{trade.symbol}_{timeframe}" if timeframe else trade.symbol)
+    return {
+        "run": run,
+        "symbol": trade.symbol,
+        "timeframe": timeframe,
+        "market_condition": condition,
+        "side": trade.side.name,
+        "quantity": trade.quantity,
+        "entry_price": trade.entry_price,
+        "exit_price": trade.exit_price,
+        "intended_stop_loss": trade.intended_stop_loss,
+        "intended_take_profit": trade.intended_take_profit,
+        "exit_slippage": trade.exit_slippage,
+        "entry_time": _format_datetime(trade.entry_time),
+        "exit_time": _format_datetime(trade.exit_time),
+        "duration_minutes": _duration_minutes(trade.entry_time, trade.exit_time),
+        "pnl": trade.pnl,
+        "pnl_pct": trade.pnl_pct,
+        "fees": trade.fees,
+        "slippage_usd": trade.slippage_usd,
+        "exit_reason": trade.exit_reason,
+        "premature_stop": trade.premature_stop,
+        "target_approach_pct": trade.target_approach_pct,
+        "volatility_regime": trade.volatility_regime,
+        "trend_regime": trade.trend_regime,
+        "volume_regime": trade.volume_regime,
+        "signal_rejected_reason": trade.signal_rejected_reason,
+        "range_width_pct": trade.range_width_pct,
+        "ema_50": trade.ema_50,
+        "adx_14": trade.adx_14,
+        "intended_sl_pct": trade.intended_sl_pct,
+        "intended_tp_pct": trade.intended_tp_pct,
+        "session_name": trade.session_name,
+        "session_open_time_utc": trade.session_open_time_utc,
+    }
+
+
+def _market_condition(volatility: str, trend: str, volume: str) -> str:
+    labels = [label.lower() for label in (trend, volatility, volume) if label]
+    return "_".join(labels) if labels else "unknown"
+
+
+def _duration_minutes(start: datetime, end: datetime) -> float:
+    return (end - start).total_seconds() / 60.0
+
+
+def _format_datetime(value: datetime) -> str:
+    return value.isoformat()
+
+
+def _bar_label(row: pd.Series, column: str) -> str:
+    if column not in row:
+        return ""
+    value = row[column]
+    if pd.isna(value):
+        return ""
+    return str(value)
+
+
+def _metadata_float(metadata: dict[str, object], key: str) -> float:
+    value = metadata.get(key)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _metadata_str(metadata: dict[str, object], key: str) -> str:
+    value = metadata.get(key)
+    return str(value) if value is not None else ""
+
+
+def _target_approach_pct(df: pd.DataFrame, position: OpenBacktestPosition, exit_index: int) -> float:
+    """Return how far price moved toward the planned target before exit."""
+    if position.side == SignalSide.LONG:
+        target_distance = position.take_profit_price - position.entry_price
+        if target_distance <= 0:
+            return 0.0
+        max_favorable = float(df.iloc[position.entry_index : exit_index + 1]["high"].max()) - position.entry_price
+    else:
+        target_distance = position.entry_price - position.take_profit_price
+        if target_distance <= 0:
+            return 0.0
+        max_favorable = position.entry_price - float(df.iloc[position.entry_index : exit_index + 1]["low"].min())
+    return max(0.0, (max_favorable / target_distance) * 100.0)
+
+
+def _premature_stop(
+    df: pd.DataFrame,
+    position: OpenBacktestPosition,
+    exit_index: int,
+    *,
+    lookahead_bars: int = 10,
+) -> bool:
+    """Return True when price hits the planned target shortly after a simulated stop."""
+    future = df.iloc[exit_index + 1 : exit_index + 1 + lookahead_bars]
+    if future.empty:
+        return False
+    if position.side == SignalSide.LONG:
+        return bool(float(future["high"].max()) >= position.take_profit_price)
+    return bool(float(future["low"].min()) <= position.take_profit_price)
+
+
+def _to_datetime(value: object) -> datetime:
+    if isinstance(value, pd.Timestamp):
+        return cast(datetime, value.to_pydatetime())
+    if isinstance(value, datetime):
+        return value
+    return cast(datetime, pd.Timestamp(value).to_pydatetime())

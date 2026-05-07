@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     rsi_long_min: float = Field(default=48.0, ge=0, le=100)
     rsi_short_max: float = Field(default=52.0, ge=0, le=100)
     cooldown_candles: int = Field(default=1, ge=0)
+    session_breakout_sessions: list[str] = Field(
+        default_factory=lambda: ["nse:03:45", "london:08:00", "new_york:14:30"]
+    )
+    session_breakout_pre_open_minutes: int = Field(default=120, gt=0)
+    session_breakout_trade_window_minutes: int = Field(default=240, gt=0)
+    session_breakout_min_range_width_pct: float = Field(default=0.4, ge=0)
+    session_breakout_ema_length: int = Field(default=50, gt=0)
+    session_breakout_adx_length: int = Field(default=14, gt=0)
+    session_breakout_min_adx: float = Field(default=20.0, ge=0)
+    session_breakout_entry_buffer_pct: float = Field(default=0.0, ge=0)
+    session_breakout_enabled_timeframes: list[str] = Field(default_factory=lambda: ["15m", "1h"])
 
     risk_per_trade_usd: float = Field(default=10.0, gt=0)
     max_daily_loss_usd: float = Field(default=50.0, gt=0)
@@ -144,6 +155,13 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip().upper() for item in value.split(",") if item.strip()]
         return [item.strip().upper() for item in value]
+
+    @field_validator("session_breakout_sessions", "session_breakout_enabled_timeframes", mode="before")
+    @classmethod
+    def normalize_string_list(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [item.strip() for item in value]
 
     @field_validator("api_cors_origins", mode="before")
     @classmethod
@@ -236,6 +254,15 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "rsi_long_min": strategy.get("rsi_long_min"),
         "rsi_short_max": strategy.get("rsi_short_max"),
         "cooldown_candles": strategy.get("cooldown_candles"),
+        "session_breakout_sessions": strategy.get("session_breakout_sessions"),
+        "session_breakout_pre_open_minutes": strategy.get("session_breakout_pre_open_minutes"),
+        "session_breakout_trade_window_minutes": strategy.get("session_breakout_trade_window_minutes"),
+        "session_breakout_min_range_width_pct": strategy.get("session_breakout_min_range_width_pct"),
+        "session_breakout_ema_length": strategy.get("session_breakout_ema_length"),
+        "session_breakout_adx_length": strategy.get("session_breakout_adx_length"),
+        "session_breakout_min_adx": strategy.get("session_breakout_min_adx"),
+        "session_breakout_entry_buffer_pct": strategy.get("session_breakout_entry_buffer_pct"),
+        "session_breakout_enabled_timeframes": strategy.get("session_breakout_enabled_timeframes"),
         "risk_per_trade_usd": risk.get("risk_per_trade_usd"),
         "max_daily_loss_usd": risk.get("max_daily_loss_usd"),
         "max_drawdown_pct": risk.get("max_drawdown_pct"),

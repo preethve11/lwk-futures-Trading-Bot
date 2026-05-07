@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from trading_bot.analytics.metrics import sharpe_ratio
+
 
 @dataclass(frozen=True)
 class TradeLogRecord:
@@ -21,6 +23,8 @@ class TradeLogRecord:
     timeframe: str
     market_condition: str
     side: str
+    entry_price: float
+    exit_price: float
     entry_time: datetime | None
     exit_time: datetime | None
     duration_minutes: float
@@ -28,12 +32,56 @@ class TradeLogRecord:
     pnl_pct: float
     fees: float
     exit_reason: str
+    intended_stop_loss: float = 0.0
+    intended_take_profit: float = 0.0
+    exit_slippage: float = 0.0
+    premature_stop: bool = False
+    target_approach_pct: float = 0.0
+    volatility_regime: str = ""
+    trend_regime: str = ""
+    volume_regime: str = ""
+    signal_rejected_reason: str = ""
+    range_width_pct: float = 0.0
+    ema_50: float = 0.0
+    adx_14: float = 0.0
+    intended_sl_pct: float = 0.0
+    intended_tp_pct: float = 0.0
+    session_name: str = ""
+    session_open_time_utc: str = ""
 
     @property
     def entry_hour_utc(self) -> str:
         if self.entry_time is None:
             return "unknown"
         return f"{self.entry_time.hour:02d}:00"
+
+    @property
+    def range_width_bucket(self) -> str:
+        if self.range_width_pct <= 0:
+            return "unknown"
+        if self.range_width_pct < 0.4:
+            return "<0.4%"
+        if self.range_width_pct < 0.8:
+            return "0.4-0.8%"
+        if self.range_width_pct < 1.5:
+            return "0.8-1.5%"
+        return ">=1.5%"
+
+    @property
+    def ema_alignment_bucket(self) -> str:
+        if self.ema_50 <= 0 or self.entry_price <= 0:
+            return "unknown"
+        if self.side.upper() == "LONG":
+            return "with_ema_regime" if self.entry_price > self.ema_50 else "against_ema_regime"
+        if self.side.upper() == "SHORT":
+            return "with_ema_regime" if self.entry_price < self.ema_50 else "against_ema_regime"
+        return "unknown"
+
+    @property
+    def adx_bucket(self) -> str:
+        if self.adx_14 <= 0:
+            return "unknown"
+        return "adx_ge_20" if self.adx_14 >= 20.0 else "adx_lt_20"
 
 
 @dataclass(frozen=True)
@@ -67,6 +115,15 @@ class StrategyResearchReport:
     by_market_condition: dict[str, dict[str, Any]]
     by_entry_hour_utc: dict[str, dict[str, Any]]
     by_exit_reason: dict[str, dict[str, Any]]
+    by_trend_regime: dict[str, dict[str, Any]]
+    by_volatility_regime: dict[str, dict[str, Any]]
+    by_volume_regime: dict[str, dict[str, Any]]
+    by_session: dict[str, dict[str, Any]]
+    by_range_width_bucket: dict[str, dict[str, Any]]
+    by_ema_alignment: dict[str, dict[str, Any]]
+    by_adx_bucket: dict[str, dict[str, Any]]
+    rejected_signal_analysis: dict[str, Any]
+    exit_quality_analysis: dict[str, Any]
     cost_analysis: dict[str, Any]
     outlier_analysis: dict[str, Any]
     question_analysis: dict[str, Any]
@@ -83,6 +140,15 @@ class StrategyResearchReport:
             "by_market_condition": self.by_market_condition,
             "by_entry_hour_utc": self.by_entry_hour_utc,
             "by_exit_reason": self.by_exit_reason,
+            "by_trend_regime": self.by_trend_regime,
+            "by_volatility_regime": self.by_volatility_regime,
+            "by_volume_regime": self.by_volume_regime,
+            "by_session": self.by_session,
+            "by_range_width_bucket": self.by_range_width_bucket,
+            "by_ema_alignment": self.by_ema_alignment,
+            "by_adx_bucket": self.by_adx_bucket,
+            "rejected_signal_analysis": self.rejected_signal_analysis,
+            "exit_quality_analysis": self.exit_quality_analysis,
             "cost_analysis": self.cost_analysis,
             "outlier_analysis": self.outlier_analysis,
             "question_analysis": self.question_analysis,
@@ -102,7 +168,12 @@ def load_trade_log(path: Path) -> list[TradeLogRecord]:
     return records
 
 
-def analyze_trade_log(path: Path) -> StrategyResearchReport:
+def analyze_trade_log(
+    path: Path,
+    *,
+    rejected_signals_path: Path | None = None,
+    group_by_regime: bool = False,
+) -> StrategyResearchReport:
     """Analyze a trade log and produce grouped research diagnostics."""
     records = load_trade_log(path)
     by_run = _group_metrics(records, lambda record: record.run)
@@ -111,11 +182,25 @@ def analyze_trade_log(path: Path) -> StrategyResearchReport:
     by_market_condition = _group_metrics(records, lambda record: record.market_condition)
     by_entry_hour_utc = _group_metrics(records, lambda record: record.entry_hour_utc)
     by_exit_reason = _group_metrics(records, lambda record: record.exit_reason)
+    by_trend_regime = _group_metrics(records, lambda record: record.trend_regime or "unknown") if group_by_regime else {}
+    by_volatility_regime = (
+        _group_metrics(records, lambda record: record.volatility_regime or "unknown") if group_by_regime else {}
+    )
+    by_volume_regime = _group_metrics(records, lambda record: record.volume_regime or "unknown") if group_by_regime else {}
+    by_session = _group_metrics(records, lambda record: record.session_name or "unknown")
+    by_range_width_bucket = _group_metrics(records, lambda record: record.range_width_bucket)
+    by_ema_alignment = _group_metrics(records, lambda record: record.ema_alignment_bucket)
+    by_adx_bucket = _group_metrics(records, lambda record: record.adx_bucket)
     overview = _metrics(records)
+    rejected_signal_analysis = _rejected_signal_analysis(
+        rejected_signals_path or _default_rejected_signals_path(path),
+        executed_trades=len(records),
+    )
+    exit_quality_analysis = _exit_quality_analysis(records)
     outliers = _outlier_analysis(records)
     cost_analysis = _cost_analysis(records, by_timeframe)
     question_analysis = _question_analysis(by_run, by_timeframe, outliers)
-    issues = _detect_issues(by_run, by_timeframe, cost_analysis, outliers)
+    issues = _detect_issues(by_run, by_timeframe, cost_analysis, outliers, exit_quality_analysis)
     return StrategyResearchReport(
         generated_at=datetime.now(timezone.utc),
         source_path=str(path),
@@ -126,6 +211,15 @@ def analyze_trade_log(path: Path) -> StrategyResearchReport:
         by_market_condition=by_market_condition,
         by_entry_hour_utc=by_entry_hour_utc,
         by_exit_reason=by_exit_reason,
+        by_trend_regime=by_trend_regime,
+        by_volatility_regime=by_volatility_regime,
+        by_volume_regime=by_volume_regime,
+        by_session=by_session,
+        by_range_width_bucket=by_range_width_bucket,
+        by_ema_alignment=by_ema_alignment,
+        by_adx_bucket=by_adx_bucket,
+        rejected_signal_analysis=rejected_signal_analysis,
+        exit_quality_analysis=exit_quality_analysis,
         cost_analysis=cost_analysis,
         outlier_analysis=outliers,
         question_analysis=question_analysis,
@@ -159,6 +253,8 @@ def _record_from_row(row: dict[str, str]) -> TradeLogRecord:
         timeframe=timeframe,
         market_condition=_text(row, "market_condition", default=_text(row, "condition", default="unknown")),
         side=_text(row, "side", default="unknown"),
+        entry_price=_float(row.get("entry_price")),
+        exit_price=_float(row.get("exit_price")),
         entry_time=_parse_datetime(row.get("entry_time")),
         exit_time=_parse_datetime(row.get("exit_time")),
         duration_minutes=_float(row.get("duration_minutes")),
@@ -166,6 +262,22 @@ def _record_from_row(row: dict[str, str]) -> TradeLogRecord:
         pnl_pct=_float(row.get("pnl_pct")),
         fees=_float(row.get("fees")),
         exit_reason=_text(row, "exit_reason", default="unknown"),
+        intended_stop_loss=_float(row.get("intended_stop_loss")),
+        intended_take_profit=_float(row.get("intended_take_profit")),
+        exit_slippage=_float(row.get("exit_slippage")),
+        premature_stop=_bool(row.get("premature_stop")),
+        target_approach_pct=_float(row.get("target_approach_pct")),
+        volatility_regime=_text(row, "volatility_regime", default="unknown"),
+        trend_regime=_text(row, "trend_regime", default="unknown"),
+        volume_regime=_text(row, "volume_regime", default="unknown"),
+        signal_rejected_reason=_text(row, "signal_rejected_reason", default=""),
+        range_width_pct=_float(row.get("range_width_pct")),
+        ema_50=_float(row.get("ema_50")),
+        adx_14=_float(row.get("adx_14")),
+        intended_sl_pct=_float(row.get("intended_sl_pct")),
+        intended_tp_pct=_float(row.get("intended_tp_pct")),
+        session_name=_text(row, "session_name", default="unknown"),
+        session_open_time_utc=_text(row, "session_open_time_utc", default=""),
     )
 
 
@@ -180,6 +292,12 @@ def _float(value: str | None) -> float:
     if value is None or not value.strip():
         return 0.0
     return float(value)
+
+
+def _bool(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -226,6 +344,7 @@ def _metrics(records: list[TradeLogRecord]) -> dict[str, Any]:
     avg_win = (gross_profit / len(wins)) if wins else 0.0
     profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
     avg_risk_reward = (avg_win / abs(avg_loss)) if avg_loss < 0 else None
+    trade_returns = [pnl / 10_000.0 for pnl in pnls]
     return {
         "total_trades": len(records),
         "total_pnl": _number(net_pnl),
@@ -234,6 +353,7 @@ def _metrics(records: list[TradeLogRecord]) -> dict[str, Any]:
         "gross_before_fees": _number(gross_before_fees),
         "win_rate": _number(len(wins) / len(records)) if records else 0.0,
         "profit_factor": _number(profit_factor),
+        "sharpe": _number(sharpe_ratio(trade_returns)) if trade_returns else 0.0,
         "expectancy": _number(net_pnl / len(records)) if records else 0.0,
         "expectancy_before_fees": _number(gross_before_fees / len(records)) if records else 0.0,
         "median_pnl": _number(statistics.median(pnls)) if pnls else 0.0,
@@ -248,6 +368,97 @@ def _metrics(records: list[TradeLogRecord]) -> dict[str, Any]:
         "fee_to_abs_net_pnl_pct": _number((fees / abs(net_pnl)) * 100.0) if abs(net_pnl) > 0 else None,
         "avg_duration_minutes": _number(statistics.mean(record.duration_minutes for record in records)),
     }
+
+
+def _default_rejected_signals_path(trade_log_path: Path) -> Path | None:
+    candidate = trade_log_path.parent / "rejected_signals.json"
+    return candidate if candidate.exists() else None
+
+
+def _rejected_signal_analysis(path: Path | None, *, executed_trades: int) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {
+            "available": False,
+            "path": str(path) if path is not None else None,
+            "total_signals_evaluated": executed_trades,
+            "executed_trades": executed_trades,
+            "rejected_signals": 0,
+            "rejection_rate": 0.0,
+            "rejected_to_executed_ratio": 0.0,
+            "rejections": {},
+        }
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    rejections_raw = payload.get("rejections", {})
+    rejections = {str(key): int(value) for key, value in rejections_raw.items()} if isinstance(rejections_raw, dict) else {}
+    rejected = sum(rejections.values())
+    executed = int(payload.get("executed_trades") or payload.get("executed_signals") or executed_trades)
+    total = int(payload.get("total_signals_evaluated") or (executed + rejected))
+    return {
+        "available": True,
+        "path": str(path),
+        "total_signals_evaluated": total,
+        "executed_trades": executed,
+        "rejected_signals": rejected,
+        "rejection_rate": _number((rejected / total) if total else 0.0),
+        "rejected_to_executed_ratio": _number((rejected / executed) if executed else 0.0),
+        "rejections": rejections,
+    }
+
+
+def _exit_quality_analysis(records: list[TradeLogRecord]) -> dict[str, Any]:
+    total = len(records)
+    stop_hits = [record for record in records if record.exit_reason == "stop_loss"]
+    target_hits = [record for record in records if record.exit_reason == "take_profit"]
+    premature = [record for record in stop_hits if record.premature_stop]
+    unrealistic = [
+        record
+        for record in records
+        if record.exit_reason != "take_profit" and record.target_approach_pct < 50.0
+    ]
+    avg_sl_slippage = _average_pct_slippage(stop_hits, intended_field="stop")
+    avg_tp_slippage = _average_pct_slippage(target_hits, intended_field="take_profit")
+    return {
+        "total_trades": total,
+        "stops_hit_pct": _number(len(stop_hits) / total) if total else 0.0,
+        "targets_hit_pct": _number(len(target_hits) / total) if total else 0.0,
+        "premature_stops_pct": _number(len(premature) / len(stop_hits)) if stop_hits else 0.0,
+        "unrealistic_targets_pct": _number(len(unrealistic) / total) if total else 0.0,
+        "avg_sl_slippage_pct": _number(avg_sl_slippage),
+        "avg_tp_slippage_pct": _number(avg_tp_slippage),
+        "recommendation": _exit_quality_recommendation(stop_hits, target_hits, premature, unrealistic, total),
+    }
+
+
+def _average_pct_slippage(records: list[TradeLogRecord], *, intended_field: str) -> float:
+    percentages: list[float] = []
+    for record in records:
+        intended = record.intended_stop_loss if intended_field == "stop" else record.intended_take_profit
+        if intended == 0.0:
+            continue
+        percentages.append((record.exit_slippage / intended) * 100.0)
+    return statistics.mean(percentages) if percentages else 0.0
+
+
+def _exit_quality_recommendation(
+    stop_hits: list[TradeLogRecord],
+    target_hits: list[TradeLogRecord],
+    premature: list[TradeLogRecord],
+    unrealistic: list[TradeLogRecord],
+    total: int,
+) -> str:
+    if total == 0:
+        return "No closed trades available for exit-quality analysis."
+    stop_rate = len(stop_hits) / total
+    target_rate = len(target_hits) / total
+    premature_rate = len(premature) / len(stop_hits) if stop_hits else 0.0
+    unrealistic_rate = len(unrealistic) / total
+    if premature_rate >= 0.2 and unrealistic_rate >= 0.3:
+        return "Widen stops by 1.5x and reduce TP distance by 0.8x before the next validation run."
+    if stop_rate > target_rate * 2.0:
+        return "Stops dominate exits; test wider ATR stops and stricter entry filters."
+    if unrealistic_rate >= 0.3:
+        return "Targets are rarely approached; reduce TP distance or require stronger momentum confirmation."
+    return "Exit distances are not the primary observed failure; prioritize regime and signal-quality filters."
 
 
 def _outlier_analysis(records: list[TradeLogRecord]) -> dict[str, Any]:
@@ -396,6 +607,7 @@ def _detect_issues(
     by_timeframe: dict[str, dict[str, Any]],
     cost_analysis: dict[str, Any],
     outliers: dict[str, Any],
+    exit_quality: dict[str, Any],
 ) -> list[ResearchIssue]:
     issues: list[ResearchIssue] = []
     for run, metrics in by_run.items():
@@ -448,6 +660,26 @@ def _detect_issues(
                 recommendation="Prioritize signal quality and regime filters over only widening stops.",
             )
         )
+    premature_stops_pct = _optional_float(exit_quality.get("premature_stops_pct"))
+    unrealistic_targets_pct = _optional_float(exit_quality.get("unrealistic_targets_pct"))
+    if premature_stops_pct >= 0.2:
+        issues.append(
+            ResearchIssue(
+                severity="medium",
+                area="exit quality",
+                finding=f"{premature_stops_pct * 100:.1f}% of stop-loss exits reached the target shortly afterward.",
+                recommendation="Backtest wider stop distances and stricter trend/regime filters.",
+            )
+        )
+    if unrealistic_targets_pct >= 0.3:
+        issues.append(
+            ResearchIssue(
+                severity="medium",
+                area="target quality",
+                finding=f"{unrealistic_targets_pct * 100:.1f}% of trades never approached half the planned target distance.",
+                recommendation="Test smaller TP multiples or require stronger momentum before entry.",
+            )
+        )
     return issues
 
 
@@ -465,6 +697,8 @@ def _number(value: float | None) -> float | None:
 
 def _markdown_report(report: StrategyResearchReport) -> str:
     overview = report.overview
+    rejected = report.rejected_signal_analysis
+    exit_quality = report.exit_quality_analysis
     lines = [
         "# Strategy Research Diagnostics",
         "",
@@ -477,21 +711,70 @@ def _markdown_report(report: StrategyResearchReport) -> str:
         f"- Total PnL: `{overview['total_pnl']}`",
         f"- Win rate: `{float(overview['win_rate']) * 100:.1f}%`",
         f"- Profit factor: `{overview['profit_factor']}`",
+        f"- Sharpe: `{overview['sharpe']}`",
         f"- Expectancy: `{overview['expectancy']}` USD/trade",
         f"- Median PnL: `{overview['median_pnl']}`",
+        f"- Rejected/executed ratio: `{rejected['rejected_to_executed_ratio']}`",
         "",
-        "## Direct Answers",
+        "## Rejected Signal Analysis",
         "",
-        f"- BTCUSDT 5m: {report.question_analysis['why_btcusdt_5m_worse']['answer']}",
-        f"- 5m noise/cost: {report.question_analysis['is_5m_too_noisy_or_costly']['answer']}",
-        f"- Broad underperformance: {report.question_analysis['why_all_timeframes_underperform']}",
-        f"- Distribution: {report.question_analysis['trade_distribution']['answer']}",
+        f"- Available: `{rejected['available']}`",
+        f"- Total signals evaluated: `{rejected['total_signals_evaluated']}`",
+        f"- Executed trades: `{rejected['executed_trades']}`",
+        f"- Rejected signals: `{rejected['rejected_signals']}`",
+        f"- Rejection rate: `{float(rejected['rejection_rate']) * 100:.1f}%`",
+        f"- Rejected/executed ratio: `{rejected['rejected_to_executed_ratio']}`",
         "",
-        "## Metrics By Run",
-        "",
-        "| Run | Trades | PnL | Win % | PF | Expectancy | Fees | Median PnL |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if rejected["rejections"]:
+        lines.extend(
+            [
+                "| Reason | Count |",
+                "| --- | ---: |",
+            ]
+        )
+        for reason, count in sorted(rejected["rejections"].items()):
+            lines.append(f"| {reason} | {count} |")
+        lines.append("")
+    lines.extend(
+        [
+            "## Exit Quality Analysis",
+            "",
+            f"- Stops hit: `{float(exit_quality['stops_hit_pct']) * 100:.1f}%` of trades",
+            f"- Targets hit: `{float(exit_quality['targets_hit_pct']) * 100:.1f}%` of trades",
+            f"- Premature stops: `{float(exit_quality['premature_stops_pct']) * 100:.1f}%` of stop exits",
+            f"- Unrealistic targets: `{float(exit_quality['unrealistic_targets_pct']) * 100:.1f}%` of trades",
+            f"- Avg SL slippage: `{exit_quality['avg_sl_slippage_pct']}`%",
+            f"- Avg TP slippage: `{exit_quality['avg_tp_slippage_pct']}`%",
+            "",
+            f"**Recommendation**: {exit_quality['recommendation']}",
+            "",
+            "## Regime Performance Breakdown",
+            "",
+        ]
+    )
+    lines.extend(_regime_section("By Trend Regime", report.by_trend_regime, positive_label="TRENDING"))
+    lines.extend(_regime_section("By Volatility Regime", report.by_volatility_regime, positive_label="HIGH_VOL"))
+    lines.extend(_regime_section("By Volume Regime", report.by_volume_regime, positive_label="HIGH_VOLUME"))
+    lines.extend(_group_section("Performance By Session", report.by_session))
+    lines.extend(_group_section("Performance By Range Width", report.by_range_width_bucket))
+    lines.extend(_group_section("Performance By EMA Regime Alignment", report.by_ema_alignment))
+    lines.extend(_group_section("Performance By ADX Bucket", report.by_adx_bucket))
+    lines.extend(
+        [
+            "## Direct Answers",
+            "",
+            f"- BTCUSDT 5m: {report.question_analysis['why_btcusdt_5m_worse']['answer']}",
+            f"- 5m noise/cost: {report.question_analysis['is_5m_too_noisy_or_costly']['answer']}",
+            f"- Broad underperformance: {report.question_analysis['why_all_timeframes_underperform']}",
+            f"- Distribution: {report.question_analysis['trade_distribution']['answer']}",
+            "",
+            "## Metrics By Run",
+            "",
+            "| Run | Trades | PnL | Win % | PF | Expectancy | Fees | Median PnL |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
     for run, metrics in sorted(report.by_run.items()):
         lines.append(
             f"| {run} | {metrics['total_trades']} | {metrics['total_pnl']} | "
@@ -514,12 +797,64 @@ def _markdown_report(report: StrategyResearchReport) -> str:
             "",
             "- Disable failing symbol/timeframe buckets before live testing.",
             "- Add regime labels to backtests and test trend/range filters out of sample.",
-            "- Add rejected-signal counters and intended SL/TP columns to trade logs.",
+            "- Use rejected-signal counters and intended SL/TP columns to isolate filter and exit-distance failures.",
             "- Run authenticated Binance testnet after a strategy passes the live performance gate.",
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def _regime_section(title: str, metrics_by_regime: dict[str, dict[str, Any]], *, positive_label: str) -> list[str]:
+    if not metrics_by_regime:
+        return [f"### {title}", "", "No regime labels were available in this trade log.", ""]
+    lines = [
+        f"### {title}",
+        "",
+        "| Regime | Trades | Win % | PF | Expectancy | Sharpe |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    best_regime = ""
+    best_expectancy = float("-inf")
+    for regime, metrics in sorted(metrics_by_regime.items()):
+        expectancy = float(metrics["expectancy"])
+        if expectancy > best_expectancy:
+            best_expectancy = expectancy
+            best_regime = regime
+        lines.append(
+            f"| {regime} | {metrics['total_trades']} | {float(metrics['win_rate']) * 100:.1f} | "
+            f"{_md(metrics['profit_factor'])} | {metrics['expectancy']} | {_md(metrics['sharpe'])} |"
+        )
+    recommendation = _regime_recommendation(best_regime, best_expectancy, positive_label)
+    lines.extend(["", f"**Recommendation**: {recommendation}", ""])
+    return lines
+
+
+def _group_section(title: str, metrics_by_group: dict[str, dict[str, Any]]) -> list[str]:
+    if not metrics_by_group:
+        return [f"## {title}", "", "No data available.", ""]
+    lines = [
+        f"## {title}",
+        "",
+        "| Bucket | Trades | PnL | Win % | PF | Expectancy | Fees |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for bucket, metrics in sorted(metrics_by_group.items()):
+        lines.append(
+            f"| {bucket} | {metrics['total_trades']} | {metrics['total_pnl']} | "
+            f"{float(metrics['win_rate']) * 100:.1f} | {_md(metrics['profit_factor'])} | "
+            f"{metrics['expectancy']} | {metrics['total_fees']} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _regime_recommendation(best_regime: str, best_expectancy: float, positive_label: str) -> str:
+    if best_expectancy <= 0:
+        return "No regime bucket shows positive expectancy in this sample."
+    if best_regime == positive_label:
+        return f"{positive_label} shows the strongest edge; keep this filter in the next validation run."
+    return f"{best_regime} is strongest in this sample; validate before hard-coding the expected {positive_label} filter."
 
 
 def _md(value: object) -> str:

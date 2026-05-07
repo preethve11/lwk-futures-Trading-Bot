@@ -66,3 +66,19 @@ class Trade:
     exit_reason: str  # "stop_loss" | "take_profit" | "trailing_stop" | "manual" | "signal_reverse"
     fees: float = 0.0
     slippage_usd: float = 0.0
+    intended_stop_loss: float = 0.0
+    intended_take_profit: float = 0.0
+    exit_slippage: float = 0.0
+    premature_stop: bool = False
+    target_approach_pct: float = 0.0
+    volatility_regime: str = ""
+    trend_regime: str = ""
+    volume_regime: str = ""
+    signal_rejected_reason: str = ""
+    range_width_pct: float = 0.0
+    ema_50: float = 0.0
+    adx_14: float = 0.0
+    intended_sl_pct: float = 0.0
+    intended_tp_pct: float = 0.0
+    session_name: str = ""
+    session_open_time_utc: str = ""
