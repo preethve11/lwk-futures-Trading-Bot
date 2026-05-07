@@ -4,6 +4,7 @@ All notable changes are tracked here.
 
 ## Unreleased
 
+- Add read-only mainnet readiness checklist CLI, small-notional protocol docs, WebSocket fanout tests, and frontend component/WebSocket rendering tests.
 - Add account/equity reconciliation with Binance wallet polling, live equity snapshot persistence, drift alerts, API/dashboard visibility, metrics, and migration.
 - Add exchange lifecycle reconciliation command with order status polling, partial-fill aggregation, position drift detection, stale reduce-only cancellation, and order lifecycle migration.
 - Add one-shot `recover-unprotected` command for persisted `FAILED_UNPROTECTED` orders with protection recheck, emergency close, alerts, and audit events.

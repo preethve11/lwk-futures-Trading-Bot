@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../App';
@@ -73,5 +73,25 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText('No persisted open position')).toBeInTheDocument());
     expect(fetch).toHaveBeenCalled();
     expect(MockWebSocket.instances[0]?.url).toContain('/ws/live');
+  });
+
+  it('renders incoming WebSocket events in the event viewer', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(MockWebSocket.instances[0]).toBeDefined());
+    act(() => {
+      MockWebSocket.instances[0].onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            event_type: 'risk_event',
+            payload: { kill_switch_enabled: true, reason: 'test' }
+          })
+        })
+      );
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Events/i }));
+
+    expect(await screen.findByText('risk_event')).toBeInTheDocument();
+    expect(screen.getByText(/kill_switch_enabled/)).toBeInTheDocument();
   });
 });

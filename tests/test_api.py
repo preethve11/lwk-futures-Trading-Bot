@@ -334,6 +334,28 @@ def test_websocket_receives_live_events() -> None:
     assert event["payload"]["kill_switch_enabled"] is True
 
 
+def test_websocket_broadcasts_risk_events_to_multiple_clients() -> None:
+    client, _ = _client()
+
+    with client.websocket_connect("/ws/live") as first, client.websocket_connect("/ws/live") as second:
+        assert first.receive_json()["event_type"] == "connected"
+        assert second.receive_json()["event_type"] == "connected"
+
+        response = client.post(
+            "/risk/state",
+            headers=_headers(),
+            json={"manual_pause_enabled": True, "reason": "fanout test"},
+        )
+        first_event = first.receive_json()
+        second_event = second.receive_json()
+
+    assert response.status_code == 200
+    assert first_event["event_type"] == "risk_event"
+    assert second_event["event_type"] == "risk_event"
+    assert first_event["payload"]["manual_pause_enabled"] is True
+    assert second_event["payload"]["reason"] == "fanout test"
+
+
 def test_backtest_run_endpoint_persists_result() -> None:
     client, _ = _client()
     candles = [

@@ -161,6 +161,9 @@ py main.py market-data
 py main.py db-upgrade --revision head
 py main.py db-current
 
+# Mainnet readiness, read-only
+py main.py mainnet-checklist --small-notional-usd 10
+
 # Account/equity reconciliation
 py main.py reconcile-account --asset USDT
 
@@ -224,6 +227,10 @@ docker compose --profile monitoring up --build
 Deployment and incident runbook: [docs/deployment-monitoring.md](docs/deployment-monitoring.md)
 
 Database migrations: [docs/database-migrations.md](docs/database-migrations.md)
+
+Mainnet readiness: [docs/mainnet-dry-run-checklist.md](docs/mainnet-dry-run-checklist.md)
+
+Small-notional test protocol: [docs/small-notional-test-protocol.md](docs/small-notional-test-protocol.md)
 
 ## Repository Map
 
@@ -291,10 +298,9 @@ Completed:
 
 Still recommended:
 
-- Mainnet dry-run checklist and small-notional test protocol.
 - VPS TLS/reverse-proxy automation.
 - Backup and restore automation.
-- More frontend component and WebSocket tests.
+- Browser-level dashboard regression tests.
 
 ## Contributing
 

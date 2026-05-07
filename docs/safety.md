@@ -81,6 +81,7 @@ The AI trade journal is advisory-only:
 Before mainnet:
 
 - CI green on the target branch.
+- `py main.py mainnet-checklist --small-notional-usd 10` reviewed with no unresolved failures.
 - Testnet trade lifecycle tested end to end.
 - Emergency close path tested on testnet.
 - Dashboard kill switch tested.
@@ -89,4 +90,9 @@ Before mainnet:
 - Backup plan confirmed.
 - Secrets supplied only through env or secret manager.
 - API and dashboard behind TLS and access control.
+
+Detailed runbooks:
+
+- [Mainnet dry-run checklist](mainnet-dry-run-checklist.md)
+- [Small-notional mainnet test protocol](small-notional-test-protocol.md)
 

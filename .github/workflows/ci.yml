@@ -66,6 +66,9 @@ jobs:
           DATABASE_URL=sqlite:///pytest_tmp/ci_migration.db python main.py db-upgrade --revision head
           DATABASE_URL=sqlite:///pytest_tmp/ci_migration.db python main.py db-current
 
+      - name: Mainnet checklist smoke
+        run: python main.py mainnet-checklist --allow-failures
+
       - name: Frontend install
         working-directory: frontend
         run: npm ci

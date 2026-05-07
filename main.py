@@ -8,6 +8,7 @@ Usage:
   python main.py monte-carlo [--config config.yaml]
   python main.py db-upgrade [--config config.yaml]
   python main.py db-current [--config config.yaml]
+  python main.py mainnet-checklist [--config config.yaml]
   python main.py reconcile-account [--config config.yaml]
   python main.py reconcile-lifecycle [--config config.yaml]
   python main.py recover-unprotected [--config config.yaml]
@@ -38,6 +39,7 @@ from app.analytics.monte_carlo import MonteCarloReportExporter, MonteCarloSimula
 from app.core.config import Settings
 from app.market_data.binance_ws import BinanceKlineStreamService
 from app.market_data.redis_store import RedisKlineStore
+from app.ops.mainnet_readiness import evaluate_mainnet_readiness, format_mainnet_readiness_report
 from app.persistence.database import create_session_factory, init_db, session_scope
 from app.persistence.repositories import TradeRepository
 from app.workers.account_equity import AccountEquityReconciliationWorker
@@ -422,6 +424,15 @@ def run_db_current(config_path: Path | None) -> int:
     return 0
 
 
+def run_mainnet_checklist(config_path: Path | None, small_notional_usd: float, allow_failures: bool) -> int:
+    """Run read-only mainnet readiness checks without exchange calls."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    report = evaluate_mainnet_readiness(settings, small_notional_usd=small_notional_usd)
+    print(format_mainnet_readiness_report(report))
+    return 0 if report.ready or allow_failures else 1
+
+
 def run_recover_unprotected(config_path: Path | None, limit: int) -> int:
     """Recover persisted failed-unprotected orders with verification and emergency close."""
     settings = load_config(config_path, ROOT)
@@ -595,6 +606,7 @@ def main() -> int:
             "monte-carlo",
             "db-upgrade",
             "db-current",
+            "mainnet-checklist",
             "reconcile-account",
             "reconcile-lifecycle",
             "recover-unprotected",
@@ -604,7 +616,7 @@ def main() -> int:
         ],
         help=(
             "Run backtest, backtest-multi, walk-forward, monte-carlo, db-upgrade, db-current, "
-            "reconcile-account, reconcile-lifecycle, recover-unprotected, live, api, or market-data"
+            "mainnet-checklist, reconcile-account, reconcile-lifecycle, recover-unprotected, live, api, or market-data"
         ),
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
@@ -620,6 +632,8 @@ def main() -> int:
     parser.add_argument("--revision", default="head", help="Alembic revision for db-upgrade")
     parser.add_argument("--limit", type=int, default=100, help="Maximum failed-unprotected orders to recover")
     parser.add_argument("--asset", default="USDT", help="Account asset for account reconciliation")
+    parser.add_argument("--small-notional-usd", type=float, default=10.0, help="Risk budget for mainnet checklist")
+    parser.add_argument("--allow-failures", action="store_true", help="Return zero even when checklist items fail")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
@@ -640,6 +654,8 @@ def main() -> int:
         return run_db_upgrade(args.config, args.revision)
     if args.mode == "db-current":
         return run_db_current(args.config)
+    if args.mode == "mainnet-checklist":
+        return run_mainnet_checklist(args.config, args.small_notional_usd, args.allow_failures)
     if args.mode == "reconcile-account":
         return run_reconcile_account(args.config, args.asset)
     if args.mode == "reconcile-lifecycle":
