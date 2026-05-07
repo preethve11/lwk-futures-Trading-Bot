@@ -133,8 +133,11 @@ class MonteCarloSimulator:
         ruined = 0
 
         for _ in range(self.simulations):
-            sampled = rng.choice(pnls, size=self.horizon_trades, replace=True)
-            equity_curve = np.concatenate(([self.initial_capital], self.initial_capital + np.cumsum(sampled)))
+            sampled: np.ndarray[Any, np.dtype[np.float64]] = rng.choice(pnls, size=self.horizon_trades, replace=True)
+            cumulative: np.ndarray[Any, np.dtype[np.float64]] = self.initial_capital + np.cumsum(sampled)
+            equity_curve: np.ndarray[Any, np.dtype[np.float64]] = np.concatenate(
+                (np.array([self.initial_capital], dtype=float), cumulative)
+            )
             final_capital = float(equity_curve[-1])
             max_drawdown = _max_drawdown_pct(equity_curve)
             if float(np.min(equity_curve)) <= ruin_equity:
