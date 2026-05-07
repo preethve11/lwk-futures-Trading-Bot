@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
