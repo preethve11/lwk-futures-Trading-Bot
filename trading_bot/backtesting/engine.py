@@ -168,7 +168,10 @@ class BacktestEngine:
             getattr(self.strategy, "vol_ma_len", 20),
         ) + 2
 
-        for i in range(min_bars, len(df)):
+        # Keep one future candle available for exit simulation. Otherwise the
+        # engine can open a position on the final bar and mark it end_of_data
+        # at the same timestamp, which produces impossible zero-duration trades.
+        for i in range(min_bars, max(min_bars, len(df) - 1)):
             bar = df.iloc[i]
             bar_time = bar["time"] if isinstance(bar["time"], datetime) else pd.Timestamp(bar["time"])
             bar_date = bar_time.date() if hasattr(bar_time, "date") else pd.Timestamp(bar_time).date()
