@@ -96,7 +96,7 @@ class BacktestEngine:
         self.risk_manager.set_daily_loss(0.0)
         equity_curve = [capital]
         trades: List[Trade] = []
-        open_pos: Optional[tuple] = None
+        open_pos: Optional[tuple[SignalSide, float, float, float, float, datetime, int]] = None
         cooldown_bars = 0
         last_bar_date = None
         min_bars = max(
@@ -116,7 +116,7 @@ class BacktestEngine:
             slip_mult = 1 + self.slippage_bps / 10000.0
 
             if open_pos is not None:
-                side, entry_price, qty, stop, tp, _ = open_pos
+                side, entry_price, qty, stop, tp, entry_time, _ = open_pos
                 exit_price = None
                 exit_reason = ""
                 if side == SignalSide.LONG:
@@ -151,7 +151,7 @@ class BacktestEngine:
                             exit_price=exit_price_adj,
                             pnl=pnl,
                             pnl_pct=pnl_pct,
-                            entry_time=datetime.min,
+                            entry_time=entry_time,
                             exit_time=bar_time,
                             exit_reason=exit_reason,
                             fees=fee,
@@ -194,12 +194,12 @@ class BacktestEngine:
 
             qty = result.quantity
             entry_adj = entry_price * slip_mult if raw_signal.side == SignalSide.LONG else entry_price / slip_mult
-            open_pos = (raw_signal.side, entry_adj, qty, raw_signal.stop_price, raw_signal.take_profit_price, i)
+            open_pos = (raw_signal.side, entry_adj, qty, raw_signal.stop_price, raw_signal.take_profit_price, bar_time, i)
             cooldown_bars = getattr(self.strategy, "cooldown_candles", 1) if hasattr(self.strategy, "cooldown_candles") else 1
             equity_curve.append(capital)
 
         if open_pos is not None and len(df) > 0:
-            side, entry_price, qty, _, _, _ = open_pos
+            side, entry_price, qty, _, _, entry_time, _ = open_pos
             last_close = float(df.iloc[-1]["close"])
             pnl = (last_close - entry_price) * qty if side == SignalSide.LONG else (entry_price - last_close) * qty
             fee = 2 * (qty * entry_price) * (self.fee_bps / 10000.0)
@@ -214,7 +214,7 @@ class BacktestEngine:
                     exit_price=last_close,
                     pnl=pnl,
                     pnl_pct=(pnl / (qty * entry_price)) * 100,
-                    entry_time=datetime.min,
+                    entry_time=entry_time,
                     exit_time=df.iloc[-1]["time"],
                     exit_reason="end_of_data",
                     fees=fee,

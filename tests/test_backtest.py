@@ -111,6 +111,17 @@ def test_backtest_filters_to_configured_date_range_before_signals() -> None:
     assert max(strategy.observed_last_closed_times) <= pd.Timestamp(end)
 
 
+def test_backtest_records_actual_entry_time_in_trade_log() -> None:
+    strategy = AlwaysLongStrategy()
+    engine = BacktestEngine(strategy=strategy, risk_manager=_risk_manager(), initial_capital=10_000)
+
+    result = engine.run(_market_data(), symbol="ZECUSDT")
+
+    assert result.trades
+    assert result.trades[0].entry_time != datetime.min
+    assert result.trades[0].entry_time >= pd.Timestamp("2026-01-01T00:00:00Z")
+
+
 def test_csv_loader_normalizes_and_filters_ohlcv(tmp_path: Path) -> None:
     csv_path = tmp_path / "zec_5m.csv"
     _market_data().to_csv(csv_path, index=False)

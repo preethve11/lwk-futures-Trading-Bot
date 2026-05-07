@@ -5,6 +5,7 @@ All notable changes are tracked here.
 ## Unreleased
 
 - Add strategy performance gate for live promotion, mainnet enforcement, API/dashboard visibility, CLI smoke, and tests.
+- Fix backtest trade logs to record actual entry timestamps instead of `datetime.min`.
 - Add read-only mainnet readiness checklist CLI, small-notional protocol docs, WebSocket fanout tests, and frontend component/WebSocket rendering tests.
 - Add account/equity reconciliation with Binance wallet polling, live equity snapshot persistence, drift alerts, API/dashboard visibility, metrics, and migration.
 - Add exchange lifecycle reconciliation command with order status polling, partial-fill aggregation, position drift detection, stale reduce-only cancellation, and order lifecycle migration.
