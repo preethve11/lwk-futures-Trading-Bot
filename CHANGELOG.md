@@ -4,6 +4,7 @@ All notable changes are tracked here.
 
 ## Unreleased
 
+- Add `strategy-research` diagnostics for trade distribution, timeframe cost drag, outlier concentration, and direct losing-strategy root-cause analysis.
 - Add strategy performance gate for live promotion, mainnet enforcement, API/dashboard visibility, CLI smoke, and tests.
 - Fix backtest trade logs to record actual entry timestamps instead of `datetime.min`.
 - Add read-only mainnet readiness checklist CLI, small-notional protocol docs, WebSocket fanout tests, and frontend component/WebSocket rendering tests.

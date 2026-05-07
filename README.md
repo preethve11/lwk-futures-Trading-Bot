@@ -17,7 +17,7 @@ This repository is built for research, testnet operation, and engineering portfo
 - Repository layer for database access.
 - FastAPI operator API with token auth, WebSocket live events, readiness, and Prometheus metrics.
 - React/Vite dashboard for live status, risk controls, trades, backtests, equity curve, logs/events, and AI journal output.
-- Multi-symbol backtesting, JSON report export, walk-forward optimization, and Monte Carlo simulation.
+- Multi-symbol backtesting, JSON report export, walk-forward optimization, Monte Carlo simulation, and strategy research diagnostics.
 - Binance WebSocket kline market-data service with Redis pub/sub/cache.
 - Advisory-only AI trade journal. AI can explain decisions but cannot place orders or mutate trading state.
 - Docker Compose stack for backend, frontend, Postgres, Redis, optional market-data worker, Prometheus, and Grafana.
@@ -151,6 +151,9 @@ py main.py walk-forward --report-json reports/optimizations/walk_forward.json
 # Monte Carlo simulation
 py main.py monte-carlo --returns-json reports/backtests/example.json --report-json reports/monte_carlo/example.json
 
+# Explain strategy losses from a generated trade log
+py main.py strategy-research --trades-csv reports/paper_validation/run_id/trade_log.csv
+
 # API
 py main.py api --host 127.0.0.1 --port 8000
 
@@ -217,7 +220,10 @@ Read before live use: [docs/safety.md](docs/safety.md)
 
 Reports include Sharpe, Sortino, max drawdown, win rate, profit factor, average R:R, equity curves, and JSON export paths. Use walk-forward and Monte Carlo before trusting a parameter set.
 
+`strategy-research` consumes a paper-validation `trade_log.csv` and explains losses by symbol, timeframe, market condition, hour-of-day, exit reason, transaction-cost drag, and outlier concentration. It is designed to answer whether a bad run is driven by 5m noise, costs, broad negative expectancy, or a small number of large losses.
+
 Example report: [docs/example-backtest-report.md](docs/example-backtest-report.md)
+Strategy research guide: [docs/strategy-research.md](docs/strategy-research.md)
 
 ## Deployment
 
@@ -244,7 +250,7 @@ Strategy gate: [docs/strategy-performance-gate.md](docs/strategy-performance-gat
 ```text
 app/
   ai/              advisory-only AI journal
-  analytics/       Monte Carlo simulation
+  analytics/       Monte Carlo simulation and strategy research diagnostics
   api/             FastAPI app, routers, schemas, event bus
   backtesting/     multi-symbol and walk-forward tooling
   core/            Pydantic settings

@@ -6,6 +6,7 @@ Usage:
   python main.py backtest-multi [--config config.yaml]
   python main.py walk-forward [--config config.yaml]
   python main.py monte-carlo [--config config.yaml]
+  python main.py strategy-research --trades-csv reports/paper_validation/.../trade_log.csv
   python main.py db-upgrade [--config config.yaml]
   python main.py db-current [--config config.yaml]
   python main.py mainnet-checklist [--config config.yaml]
@@ -37,6 +38,7 @@ from app.backtesting.data_loader import load_csv_ohlcv
 from app.backtesting.multi_symbol import BacktestReportExporter, MultiSymbolBacktestRunner
 from app.backtesting.walk_forward import WalkForwardOptimizer, WalkForwardReportExporter
 from app.analytics.monte_carlo import MonteCarloReportExporter, MonteCarloSimulator, load_trade_pnls_json
+from app.analytics.strategy_research import StrategyResearchReportExporter, analyze_trade_log
 from app.core.config import Settings
 from app.market_data.binance_ws import BinanceKlineStreamService
 from app.market_data.redis_store import RedisKlineStore
@@ -245,6 +247,42 @@ def run_monte_carlo(
     return 0
 
 
+def run_strategy_research(
+    trades_csv: Path | None,
+    report_json: Path | None,
+    report_markdown: Path | None,
+) -> int:
+    """Analyze paper-validation trade logs for strategy research diagnostics."""
+    source = trades_csv or _latest_trade_log()
+    if source is None:
+        logging.getLogger("trading_bot.strategy_research").error(
+            "strategy-research requires --trades-csv or a reports/paper_validation/*/trade_log.csv artifact"
+        )
+        return 1
+    report = analyze_trade_log(source)
+    json_path = report_json or source.parent / "strategy_research.json"
+    markdown_path = report_markdown or source.parent / "strategy_research.md"
+    StrategyResearchReportExporter.write_json(report, json_path)
+    StrategyResearchReportExporter.write_markdown(report, markdown_path)
+
+    overview = report.overview
+    worst_run = report.question_analysis["worst_run"]
+    best_run = report.question_analysis["best_run"]
+    print("\n--- Strategy Research Diagnostics ---")
+    print(f"Trade log: {source}")
+    print(f"Trades: {overview['total_trades']}")
+    print(f"Total PnL: {overview['total_pnl']}")
+    print(f"Win rate: {float(overview['win_rate']) * 100:.1f}%")
+    print(f"Profit factor: {overview['profit_factor']}")
+    print(f"Expectancy: {overview['expectancy']} USD/trade")
+    print(f"Worst run: {worst_run['run']}")
+    print(f"Best run: {best_run['run']}")
+    print(f"Issues: {len(report.issues)}")
+    print(f"JSON report: {json_path}")
+    print(f"Markdown report: {markdown_path}")
+    return 0
+
+
 def _load_monte_carlo_trade_pnls(
     settings: Settings,
     logger: logging.Logger,
@@ -267,6 +305,11 @@ def _load_monte_carlo_trade_pnls(
     except Exception as exc:
         logger.error("Could not load persisted trades for Monte Carlo simulation", extra={"error": str(exc)})
         return []
+
+
+def _latest_trade_log() -> Path | None:
+    candidates = sorted((ROOT / "reports" / "paper_validation").glob("*/trade_log.csv"), key=lambda path: path.stat().st_mtime)
+    return candidates[-1] if candidates else None
 
 
 def _load_walk_forward_dataset(settings: Settings, logger: logging.Logger) -> pd.DataFrame | None:
@@ -624,6 +667,7 @@ def main() -> int:
             "backtest-multi",
             "walk-forward",
             "monte-carlo",
+            "strategy-research",
             "db-upgrade",
             "db-current",
             "mainnet-checklist",
@@ -636,7 +680,7 @@ def main() -> int:
             "market-data",
         ],
         help=(
-            "Run backtest, backtest-multi, walk-forward, monte-carlo, db-upgrade, db-current, "
+            "Run backtest, backtest-multi, walk-forward, monte-carlo, strategy-research, db-upgrade, db-current, "
             "mainnet-checklist, strategy-gate, reconcile-account, reconcile-lifecycle, recover-unprotected, live, api, or market-data"
         ),
     )
@@ -647,6 +691,8 @@ def main() -> int:
     parser.add_argument("--report-html", type=Path, default=None, help="Optional multi-symbol HTML report path")
     parser.add_argument("--max-messages", type=int, default=None, help="Stop market-data mode after N published messages")
     parser.add_argument("--returns-json", type=Path, default=None, help="Monte Carlo input JSON with pnls, returns, or equity_curve")
+    parser.add_argument("--trades-csv", type=Path, default=None, help="Trade log CSV for strategy-research mode")
+    parser.add_argument("--report-markdown", type=Path, default=None, help="Markdown strategy research report output path")
     parser.add_argument("--simulations", type=int, default=None, help="Monte Carlo simulation count")
     parser.add_argument("--horizon-trades", type=int, default=None, help="Monte Carlo forward trade horizon")
     parser.add_argument("--ruin-drawdown-pct", type=float, default=None, help="Monte Carlo ruin threshold as drawdown percent")
@@ -671,6 +717,8 @@ def main() -> int:
             args.horizon_trades,
             args.ruin_drawdown_pct,
         )
+    if args.mode == "strategy-research":
+        return run_strategy_research(args.trades_csv, args.report_json, args.report_markdown)
     if args.mode == "db-upgrade":
         return run_db_upgrade(args.config, args.revision)
     if args.mode == "db-current":
