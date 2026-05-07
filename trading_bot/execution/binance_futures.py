@@ -64,7 +64,9 @@ class BinanceFuturesClient(ExecutionClient):
     ):
         self._client = Client(api_key, api_secret)
         if testnet:
-            self._client.API_URL = "https://testnet.binancefuture.com/fapi"
+            self._client.API_URL = self._client.FUTURES_TESTNET_URL
+            self._client.FUTURES_URL = self._client.FUTURES_TESTNET_URL
+            self._client.FUTURES_DATA_URL = self._client.FUTURES_DATA_TESTNET_URL
             logger.info("Binance Futures: using TESTNET")
         else:
             logger.info("Binance Futures: using LIVE")

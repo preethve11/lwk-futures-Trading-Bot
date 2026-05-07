@@ -12,6 +12,7 @@ Usage:
   python main.py db-upgrade [--config config.yaml]
   python main.py db-current [--config config.yaml]
   python main.py mainnet-checklist [--config config.yaml]
+  python main.py testnet-execution-check [--config config.yaml]
   python main.py strategy-gate [--config config.yaml]
   python main.py reconcile-account [--config config.yaml]
   python main.py reconcile-lifecycle [--config config.yaml]
@@ -49,6 +50,7 @@ from app.market_data.binance_ws import BinanceKlineStreamService
 from app.market_data.redis_store import RedisKlineStore
 from app.ops.mainnet_readiness import evaluate_mainnet_readiness, format_mainnet_readiness_report
 from app.ops.performance_gate import evaluate_strategy_performance_gate, format_strategy_performance_gate
+from app.ops.testnet_execution import run_testnet_execution_validation, write_testnet_execution_report
 from app.persistence.database import create_session_factory, init_db, session_scope
 from app.persistence.repositories import TradeRepository
 from app.workers.account_equity import AccountEquityReconciliationWorker
@@ -59,6 +61,7 @@ from app.workers.live_trader import LiveTrader
 from trading_bot.backtesting.engine import BacktestArtifactExporter, BacktestEngine, BacktestRecorder, BacktestResult
 from trading_bot.core.config import load_config
 from trading_bot.core.logger import setup_logging
+from trading_bot.core.types import SignalSide
 from trading_bot.execution.binance_futures import BinanceFuturesClient
 from trading_bot.risk.manager import RiskManager
 from trading_bot.utils.alerts import AlertQueue
@@ -641,6 +644,97 @@ def run_mainnet_checklist(config_path: Path | None, small_notional_usd: float, a
     return 0 if report.ready or allow_failures else 1
 
 
+def run_testnet_execution_check(
+    config_path: Path | None,
+    *,
+    symbol: str | None,
+    timeframe: str | None,
+    side: str,
+    small_notional_usd: float,
+    max_fee_bps: float,
+    max_slippage_bps: float,
+    probe_stop_pct: float,
+    probe_tp_pct: float,
+    output_dir: Path | None,
+    allow_failures: bool,
+) -> int:
+    """Run one guarded Binance Futures testnet execution probe for the promoted candidate."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    logger = logging.getLogger("trading_bot.testnet_execution")
+    candidate_symbol = (symbol or "ZECUSDT").upper()
+    candidate_timeframe = timeframe or "15m"
+    if candidate_symbol != "ZECUSDT" or candidate_timeframe != "15m":
+        logger.error(
+            "Testnet execution validation is currently restricted to session_breakout_ZECUSDT_15m",
+            extra={"symbol": candidate_symbol, "timeframe": candidate_timeframe},
+        )
+        return 1
+    if not settings.use_testnet:
+        logger.error("Refusing testnet execution check because USE_TESTNET is false")
+        return 1
+    if not settings.active_binance_api_key or not settings.active_binance_api_secret:
+        logger.error(
+            "Testnet execution check needs BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET"
+        )
+        return 1
+
+    try:
+        signal_side = _parse_signal_side(side)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return 1
+
+    report = run_testnet_execution_validation(
+        client=BinanceFuturesClient(
+            settings.active_binance_api_key,
+            settings.active_binance_api_secret,
+            testnet=True,
+        ),
+        symbol=candidate_symbol,
+        timeframe=candidate_timeframe,
+        side=signal_side,
+        requested_notional_usd=small_notional_usd,
+        leverage=settings.leverage,
+        stop_pct=probe_stop_pct,
+        take_profit_pct=probe_tp_pct,
+        max_fee_bps=max_fee_bps,
+        max_slippage_bps=max_slippage_bps,
+    )
+    target_dir = output_dir or ROOT / "reports" / "testnet_execution" / "latest"
+    json_path, markdown_path = write_testnet_execution_report(report, target_dir)
+
+    print("\n--- Testnet Execution Validation ---")
+    print(f"Candidate: session_breakout_{report.symbol}_{report.timeframe}")
+    print(f"Status: {'PASS' if report.passed else 'FAIL'}")
+    print(f"Protected: {report.protected}")
+    print(f"Entry latency ms: {report.entry_latency_ms}")
+    print(f"Entry slippage bps: {report.entry_slippage_bps}")
+    print(f"Entry fee bps: {report.entry_fee_bps}")
+    print(f"Open orders after cleanup: {report.open_orders_after}")
+    print(f"Open position after cleanup: {report.open_position_after}")
+    print(f"JSON report: {json_path}")
+    print(f"Markdown report: {markdown_path}")
+    if report.violations:
+        print("Violations:")
+        for violation in report.violations:
+            print(f"- {violation}")
+    if report.warnings:
+        print("Warnings:")
+        for warning in report.warnings:
+            print(f"- {warning}")
+    return 0 if report.passed or allow_failures else 1
+
+
+def _parse_signal_side(value: str) -> SignalSide:
+    normalized = value.strip().upper()
+    if normalized in {"LONG", "BUY"}:
+        return SignalSide.LONG
+    if normalized in {"SHORT", "SELL"}:
+        return SignalSide.SHORT
+    raise ValueError(f"Unsupported probe side: {value}")
+
+
 def run_strategy_gate(config_path: Path | None, allow_failures: bool) -> int:
     """Evaluate the latest persisted backtest against live promotion thresholds."""
     settings = load_config(config_path, ROOT)
@@ -836,6 +930,7 @@ def main() -> int:
             "db-upgrade",
             "db-current",
             "mainnet-checklist",
+            "testnet-execution-check",
             "strategy-gate",
             "reconcile-account",
             "reconcile-lifecycle",
@@ -847,7 +942,8 @@ def main() -> int:
         help=(
             "Run backtest, backtest-multi, walk-forward, monte-carlo, strategy-research, rejected-signals, "
             "strategy-compare, db-upgrade, db-current, "
-            "mainnet-checklist, strategy-gate, reconcile-account, reconcile-lifecycle, recover-unprotected, live, api, or market-data"
+            "mainnet-checklist, testnet-execution-check, strategy-gate, reconcile-account, reconcile-lifecycle, "
+            "recover-unprotected, live, api, or market-data"
         ),
     )
     parser.add_argument("paths", nargs="*", type=Path, help="Optional positional artifact paths for selected modes")
@@ -881,6 +977,16 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=100, help="Maximum failed-unprotected orders to recover")
     parser.add_argument("--asset", default="USDT", help="Account asset for account reconciliation")
     parser.add_argument("--small-notional-usd", type=float, default=10.0, help="Risk budget for mainnet checklist")
+    parser.add_argument("--max-fee-bps", type=float, default=6.0, help="Maximum acceptable testnet entry fee in bps")
+    parser.add_argument(
+        "--max-slippage-bps",
+        type=float,
+        default=10.0,
+        help="Maximum acceptable absolute testnet entry slippage in bps",
+    )
+    parser.add_argument("--probe-stop-pct", type=float, default=0.8, help="Testnet probe stop distance as percent")
+    parser.add_argument("--probe-tp-pct", type=float, default=0.8, help="Testnet probe take-profit distance as percent")
+    parser.add_argument("--side", choices=["LONG", "SHORT", "BUY", "SELL"], default="LONG", help="Testnet probe side")
     parser.add_argument("--allow-failures", action="store_true", help="Return zero even when checklist items fail")
     args = parser.parse_args()
     if args.mode == "backtest":
@@ -933,6 +1039,20 @@ def main() -> int:
         return run_db_current(args.config)
     if args.mode == "mainnet-checklist":
         return run_mainnet_checklist(args.config, args.small_notional_usd, args.allow_failures)
+    if args.mode == "testnet-execution-check":
+        return run_testnet_execution_check(
+            args.config,
+            symbol=args.symbol,
+            timeframe=args.timeframe,
+            side=args.side,
+            small_notional_usd=args.small_notional_usd,
+            max_fee_bps=args.max_fee_bps,
+            max_slippage_bps=args.max_slippage_bps,
+            probe_stop_pct=args.probe_stop_pct,
+            probe_tp_pct=args.probe_tp_pct,
+            output_dir=args.output_dir,
+            allow_failures=args.allow_failures,
+        )
     if args.mode == "strategy-gate":
         return run_strategy_gate(args.config, args.allow_failures)
     if args.mode == "reconcile-account":

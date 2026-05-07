@@ -180,6 +180,9 @@ py main.py db-current
 # Mainnet readiness, read-only
 py main.py mainnet-checklist --small-notional-usd 10
 
+# Binance Futures testnet execution validation for the current candidate only
+py main.py testnet-execution-check --symbol ZECUSDT --timeframe 15m --small-notional-usd 10 --max-fee-bps 6 --max-slippage-bps 10
+
 # Strategy live-promotion gate
 py main.py strategy-gate
 
@@ -259,6 +262,8 @@ Database migrations: [docs/database-migrations.md](docs/database-migrations.md)
 Mainnet readiness: [docs/mainnet-dry-run-checklist.md](docs/mainnet-dry-run-checklist.md)
 
 Small-notional test protocol: [docs/small-notional-test-protocol.md](docs/small-notional-test-protocol.md)
+
+Testnet execution validation: [docs/testnet-execution-validation.md](docs/testnet-execution-validation.md)
 
 Strategy gate: [docs/strategy-performance-gate.md](docs/strategy-performance-gate.md)
 
