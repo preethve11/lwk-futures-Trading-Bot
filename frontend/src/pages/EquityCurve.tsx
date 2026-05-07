@@ -16,17 +16,20 @@ function buildDrawdown(equity: number[]) {
 
 export function EquityCurve({ data }: { data: DashboardData }) {
   const initialCapital = data.backtests[0]?.initial_capital ?? 10000;
-  const equity = buildEquityCurve(initialCapital, [...data.trades].reverse().map((trade) => trade.pnl));
+  const accountEquity = data.accountEquityCurve;
+  const equity =
+    accountEquity.length > 0 ? accountEquity : buildEquityCurve(initialCapital, [...data.trades].reverse().map((trade) => trade.pnl));
   const drawdown = buildDrawdown(equity);
   const current = equity[equity.length - 1] ?? initialCapital;
   const maxDrawdown = Math.min(...drawdown, 0);
+  const source = accountEquity.length > 0 ? 'Live account' : 'Closed trades';
 
   return (
     <div className="page-stack">
       <section className="panel">
         <div className="section-heading">
           <h2>Equity Curve</h2>
-          <strong>{formatCurrency(current)}</strong>
+          <strong>{source} {formatCurrency(current)}</strong>
         </div>
         <LineChart values={equity} />
       </section>

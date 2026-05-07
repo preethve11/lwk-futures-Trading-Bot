@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, DollarSign, ShieldCheck } from 'lucide-react';
+import { Activity, AlertTriangle, DollarSign, ShieldCheck, Wallet } from 'lucide-react';
 
 import { Badge } from '../components/Badge';
 import { MetricTile } from '../components/MetricTile';
@@ -8,6 +8,7 @@ import { formatCurrency, formatDateTime, formatNumber } from '../utils/format';
 export function LiveStatus({ data }: { data: DashboardData }) {
   const session = data.latestSession;
   const position = data.currentPosition;
+  const account = data.latestAccountSnapshot;
   const riskPaused =
     data.riskState?.kill_switch_enabled ||
     data.riskState?.manual_pause_enabled ||
@@ -23,6 +24,13 @@ export function LiveStatus({ data }: { data: DashboardData }) {
           detail={session ? `${session.symbol} ${session.timeframe}` : 'Awaiting API session'}
           tone={riskPaused ? 'danger' : session?.status === 'running' ? 'ok' : 'warn'}
           icon={<Activity size={20} />}
+        />
+        <MetricTile
+          label="Account Equity"
+          value={account ? formatCurrency(account.margin_balance) : 'No snapshot'}
+          detail={account ? `${account.asset} wallet ${formatCurrency(account.wallet_balance)}` : 'Run account reconciliation'}
+          tone={account ? 'ok' : 'warn'}
+          icon={<Wallet size={20} />}
         />
         <MetricTile
           label="Realized PnL"
@@ -46,6 +54,31 @@ export function LiveStatus({ data }: { data: DashboardData }) {
           icon={<AlertTriangle size={20} />}
         />
       </div>
+
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Account Equity</h2>
+          {account ? <Badge value={account.asset} /> : <Badge value="missing" />}
+        </div>
+        {account ? (
+          <div className="facts-grid">
+            <span>Wallet</span>
+            <strong>{formatCurrency(account.wallet_balance)}</strong>
+            <span>Margin Balance</span>
+            <strong>{formatCurrency(account.margin_balance)}</strong>
+            <span>Available</span>
+            <strong>{formatCurrency(account.available_balance)}</strong>
+            <span>Unrealized PnL</span>
+            <strong className={account.unrealized_pnl >= 0 ? 'positive' : 'negative'}>
+              {formatCurrency(account.unrealized_pnl)}
+            </strong>
+            <span>Updated</span>
+            <strong>{formatDateTime(account.event_time)}</strong>
+          </div>
+        ) : (
+          <div className="empty-state">No account equity snapshots</div>
+        )}
+      </section>
 
       <section className="panel">
         <div className="section-heading">

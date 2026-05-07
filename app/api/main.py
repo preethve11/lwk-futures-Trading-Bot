@@ -12,6 +12,7 @@ from starlette.responses import Response
 
 from app.api.event_bus import LiveEventBus
 from app.api.routers import (
+    account,
     ai_reports,
     backtests,
     configs,
@@ -82,6 +83,7 @@ def create_app(
 
     app.include_router(monitoring.router)
     app.include_router(configs.router)
+    app.include_router(account.router)
     app.include_router(ai_reports.router)
     app.include_router(exchange_fills.router)
     app.include_router(backtests.router)

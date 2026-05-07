@@ -53,6 +53,7 @@ class BotSessionModel(Base):
     risk_events: Mapped[list[RiskEventModel]] = relationship(back_populates="bot_session")
     ai_reports: Mapped[list[AIReportModel]] = relationship(back_populates="bot_session")
     exchange_fills: Mapped[list[ExchangeFillModel]] = relationship(back_populates="bot_session")
+    account_snapshots: Mapped[list[AccountSnapshotModel]] = relationship(back_populates="bot_session")
 
 
 class ConfigModel(Base):
@@ -240,6 +241,27 @@ class ExchangeFillModel(Base):
 
     bot_session: Mapped[BotSessionModel | None] = relationship(back_populates="exchange_fills")
     trade: Mapped[TradeModel | None] = relationship(back_populates="exchange_fills")
+
+
+class AccountSnapshotModel(Base):
+    """Live futures wallet/equity snapshot from the exchange account state."""
+
+    __tablename__ = "account_snapshots"
+    __table_args__ = (Index("ix_account_snapshots_asset_event_time", "asset", "event_time"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bot_session_id: Mapped[int | None] = mapped_column(ForeignKey("bot_sessions.id"), nullable=True, index=True)
+    asset: Mapped[str] = mapped_column(String(24), index=True)
+    wallet_balance: Mapped[float]
+    unrealized_pnl: Mapped[float] = mapped_column(default=0.0)
+    margin_balance: Mapped[float]
+    available_balance: Mapped[float]
+    max_withdraw_amount: Mapped[float | None] = mapped_column(nullable=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    raw_response: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    bot_session: Mapped[BotSessionModel | None] = relationship(back_populates="account_snapshots")
 
 
 class RiskEventModel(Base):

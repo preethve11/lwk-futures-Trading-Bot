@@ -154,6 +154,22 @@ class ExchangeFillResponse(BaseModel):
     created_at: datetime
 
 
+class AccountSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bot_session_id: int | None
+    asset: str
+    wallet_balance: float
+    unrealized_pnl: float
+    margin_balance: float
+    available_balance: float
+    max_withdraw_amount: float | None
+    event_time: datetime
+    raw_response: dict[str, Any]
+    created_at: datetime
+
+
 class SignalResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -21,6 +21,7 @@ from app.persistence.repositories import (
     SignalRepository,
 )
 from app.strategies.registry import StrategyRegistry, create_default_strategy_registry
+from app.workers.account_equity import AccountEquityReconciliationWorker
 from app.workers.exchange_reconciliation import ExchangeReconciliationWorker
 from app.workers.reconciliation import ReconciliationOutcome, ReconciliationWorker
 from trading_bot.core.types import Signal
@@ -71,8 +72,16 @@ class LiveTrader:
         bot_session_id = self._start_bot_session(session_factory)
         reconciliation_worker = ReconciliationWorker(client, self.alert_queue)
         exchange_reconciliation_worker = ExchangeReconciliationWorker(session_factory)
+        account_equity_worker = AccountEquityReconciliationWorker(
+            session_factory=session_factory,
+            client=client,
+            alert_queue=self.alert_queue,
+            drift_threshold_usd=self.settings.account_equity_drift_threshold_usd,
+            drift_threshold_pct=self.settings.account_equity_drift_threshold_pct,
+        )
         cooldown_s = timeframe_minutes(self.settings.timeframe) * 60
         last_signal_ts = 0.0
+        last_account_reconciliation_ts = 0.0
         last_hourly = datetime.now(timezone.utc)
 
         self.alert_queue.enqueue(
@@ -95,6 +104,9 @@ class LiveTrader:
                         bot_session_id,
                         recent_account_trades,
                     )
+                    if time.monotonic() - last_account_reconciliation_ts >= self.settings.account_reconciliation_interval_seconds:
+                        self._record_account_equity(account_equity_worker, bot_session_id)
+                        last_account_reconciliation_ts = time.monotonic()
                     if not risk_manager.check_daily_loss():
                         self.logger.warning("Daily loss cap reached", extra={"symbol": self.settings.symbol})
                         self.alert_queue.enqueue(
@@ -348,6 +360,25 @@ class LiveTrader:
                 )
         except Exception as exc:
             self.logger.exception("Could not reconcile exchange account trades", extra={"error": str(exc)})
+
+    def _record_account_equity(
+        self,
+        worker: AccountEquityReconciliationWorker,
+        bot_session_id: int | None,
+    ) -> None:
+        try:
+            summary = worker.reconcile_once(asset="USDT", bot_session_id=bot_session_id)
+            if summary.drift_detected or summary.errors:
+                self.logger.warning(
+                    "Account equity reconciliation issue",
+                    extra={
+                        "asset": summary.asset,
+                        "drift_detected": summary.drift_detected,
+                        "errors": len(summary.errors),
+                    },
+                )
+        except Exception as exc:
+            self.logger.exception("Could not reconcile account equity", extra={"error": str(exc)})
 
     def _create_runtime_session_factory(self) -> SessionFactory:
         session_factory = self.session_factory or create_session_factory(self.settings.database_url)

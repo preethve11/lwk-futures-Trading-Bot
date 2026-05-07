@@ -28,6 +28,10 @@ backtest:
   start_date: "2026-01-01T00:00:00Z"
   end_date: "2026-01-02T00:00:00Z"
   initial_capital: 5000
+monitoring:
+  account_reconciliation_interval_seconds: 120
+  account_equity_drift_threshold_usd: 15
+  account_equity_drift_threshold_pct: 2.5
 """,
         encoding="utf-8",
     )
@@ -43,6 +47,9 @@ backtest:
     assert settings.leverage == 7
     assert settings.log_level == "WARNING"
     assert settings.backtest_initial_capital == 5000
+    assert settings.account_reconciliation_interval_seconds == 120
+    assert settings.account_equity_drift_threshold_usd == 15
+    assert settings.account_equity_drift_threshold_pct == 2.5
 
 
 def test_active_binance_keys_follow_testnet_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

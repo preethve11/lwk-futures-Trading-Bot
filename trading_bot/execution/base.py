@@ -53,6 +53,25 @@ class ExchangeOrderStatus:
     raw_response: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class AccountSnapshot:
+    """Normalized futures account balance snapshot."""
+
+    asset: str
+    wallet_balance: float
+    unrealized_pnl: float
+    margin_balance: float
+    available_balance: float
+    max_withdraw_amount: Optional[float] = None
+    event_time: Optional[datetime] = None
+    raw_response: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def equity(self) -> float:
+        """Return account equity used for live account curves."""
+        return self.margin_balance
+
+
 class ExecutionClient(ABC):
     """Abstract client: klines, symbol info, position, place order with SL/TP."""
 
@@ -111,3 +130,7 @@ class ExecutionClient(ABC):
     def cancel_order(self, symbol: str, order_id: str) -> OrderResult:
         """Optional: cancel a single exchange order."""
         return OrderResult(success=False, order_id=order_id, message="cancel_order is not supported")
+
+    def get_account_snapshot(self, asset: str = "USDT") -> AccountSnapshot | None:
+        """Optional: return a normalized futures account balance snapshot."""
+        return None
