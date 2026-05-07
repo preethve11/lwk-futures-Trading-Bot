@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,8 +26,26 @@ from app.persistence.models import (
 )
 from app.exchange.fills import ExchangeFill
 from trading_bot.analytics.metrics import PerformanceMetrics
-from trading_bot.core.types import Signal, Trade
-from trading_bot.execution.base import OrderResult, ProtectedOrderResult
+from trading_bot.core.types import Position, Signal, Trade
+from trading_bot.execution.base import ExchangeOrderStatus, OrderResult, ProtectedOrderResult
+
+
+@dataclass(frozen=True)
+class ExchangeFillAggregate:
+    """Fill aggregate for one exchange order."""
+
+    exchange_order_id: str
+    fill_count: int = 0
+    quantity: float = 0.0
+    quote_quantity: float = 0.0
+    realized_pnl: float = 0.0
+    commission: float = 0.0
+
+    @property
+    def avg_price(self) -> float | None:
+        if self.quantity <= 0:
+            return None
+        return self.quote_quantity / self.quantity
 
 
 class BotSessionRepository:
@@ -144,6 +163,7 @@ class OrderRepository:
         model.exchange_order_id = result.order_id
         model.avg_price = result.avg_price
         model.quantity = result.quantity if result.quantity is not None else model.quantity
+        model.filled_quantity = result.quantity if result.success and result.quantity is not None else model.filled_quantity
         model.message = result.message
         model.state = OrderLifecycleState.ENTRY_PLACED if result.success else OrderLifecycleState.FAILED_UNPROTECTED
         if result.protected_order is not None:
@@ -188,6 +208,79 @@ class OrderRepository:
             .limit(limit)
         )
         return list(self.session.scalars(statement))
+
+    def list_exchange_reconcilable(self, *, limit: int = 100) -> list[OrderModel]:
+        statement = (
+            select(OrderModel)
+            .where(OrderModel.exchange_order_id.is_not(None))
+            .where(OrderModel.state != OrderLifecycleState.FAILED_UNPROTECTED)
+            .order_by(OrderModel.updated_at.asc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
+
+    def apply_exchange_order_status(
+        self,
+        order_id: int,
+        status: ExchangeOrderStatus,
+        *,
+        fill_aggregate: ExchangeFillAggregate | None = None,
+    ) -> OrderModel:
+        model = self._get(order_id)
+        model.exchange_status = status.status or model.exchange_status
+        original_quantity = status.original_quantity if status.original_quantity is not None else model.quantity
+        status_filled = status.executed_quantity if status.executed_quantity is not None else None
+        aggregate_filled = fill_aggregate.quantity if fill_aggregate is not None and fill_aggregate.quantity > 0 else None
+        filled_values = [value for value in [status_filled, aggregate_filled, model.filled_quantity] if value is not None]
+        filled_quantity = max(filled_values) if filled_values else 0.0
+        model.quantity = original_quantity
+        model.filled_quantity = filled_quantity
+        model.remaining_quantity = max(0.0, (original_quantity or 0.0) - filled_quantity)
+        model.avg_price = self._coalesce_avg_price(status, fill_aggregate, model.avg_price)
+        model.last_reconciled_at = utc_now()
+        raw_response = dict(model.raw_response or {})
+        raw_response["exchange_lifecycle"] = {
+            "order_status": status.raw_response,
+            "fill_aggregate": self._fill_aggregate_payload(fill_aggregate),
+        }
+        model.raw_response = raw_response
+        if status.status in {"FILLED", "PARTIALLY_FILLED"} and model.state == OrderLifecycleState.PENDING:
+            model.state = OrderLifecycleState.ENTRY_PLACED
+        if status.status in {"REJECTED", "EXPIRED"}:
+            model.state = OrderLifecycleState.FAILED_UNPROTECTED
+            model.requires_manual_review = True
+            model.message = f"exchange order status is {status.status}"
+        if status.status == "CANCELED" and filled_quantity <= 0:
+            model.state = OrderLifecycleState.FAILED_UNPROTECTED
+            model.requires_manual_review = True
+            model.message = "exchange order was canceled before fill"
+        self.session.flush()
+        return model
+
+    def _coalesce_avg_price(
+        self,
+        status: ExchangeOrderStatus,
+        fill_aggregate: ExchangeFillAggregate | None,
+        current_avg_price: float | None,
+    ) -> float | None:
+        if fill_aggregate is not None and fill_aggregate.avg_price is not None:
+            return fill_aggregate.avg_price
+        if status.avg_price is not None and status.avg_price > 0:
+            return cast(float, status.avg_price)
+        return current_avg_price
+
+    def _fill_aggregate_payload(self, fill_aggregate: ExchangeFillAggregate | None) -> dict[str, object]:
+        if fill_aggregate is None:
+            return {}
+        return {
+            "exchange_order_id": fill_aggregate.exchange_order_id,
+            "fill_count": fill_aggregate.fill_count,
+            "quantity": fill_aggregate.quantity,
+            "quote_quantity": fill_aggregate.quote_quantity,
+            "avg_price": fill_aggregate.avg_price,
+            "realized_pnl": fill_aggregate.realized_pnl,
+            "commission": fill_aggregate.commission,
+        }
 
     def _get(self, order_id: int) -> OrderModel:
         model = self.session.get(OrderModel, order_id)
@@ -424,6 +517,20 @@ class ExchangeFillRepository:
         statement = statement.order_by(ExchangeFillModel.event_time.desc()).limit(limit)
         return list(self.session.scalars(statement))
 
+    def aggregate_by_order_id(self, exchange_order_id: str) -> ExchangeFillAggregate | None:
+        statement = select(ExchangeFillModel).where(ExchangeFillModel.exchange_order_id == exchange_order_id)
+        fills = list(self.session.scalars(statement))
+        if not fills:
+            return None
+        return ExchangeFillAggregate(
+            exchange_order_id=exchange_order_id,
+            fill_count=len(fills),
+            quantity=sum(fill.quantity for fill in fills),
+            quote_quantity=sum(fill.quote_quantity for fill in fills),
+            realized_pnl=sum(fill.realized_pnl for fill in fills),
+            commission=sum(fill.commission for fill in fills),
+        )
+
 
 class AIReportRepository:
     """Persistence operations for advisory AI trade journal reports."""
@@ -497,6 +604,52 @@ class PositionRepository:
             statement = statement.where(PositionModel.symbol == symbol)
         statement = statement.order_by(PositionModel.opened_at.desc()).limit(limit)
         return list(self.session.scalars(statement))
+
+    def get_open_by_symbol(self, symbol: str) -> PositionModel | None:
+        statement = (
+            select(PositionModel)
+            .where(PositionModel.symbol == symbol)
+            .where(PositionModel.status == "open")
+            .order_by(PositionModel.opened_at.desc())
+        )
+        return self.session.scalar(statement)
+
+    def sync_exchange_position(
+        self,
+        *,
+        symbol: str,
+        position: Position | None,
+        bot_session_id: int | None = None,
+    ) -> PositionModel | None:
+        current = self.get_open_by_symbol(symbol)
+        if position is None:
+            for open_position in self.session.scalars(
+                select(PositionModel).where(PositionModel.symbol == symbol).where(PositionModel.status == "open")
+            ):
+                open_position.status = "closed"
+                open_position.closed_at = utc_now()
+            self.session.flush()
+            return None
+        if current is None:
+            current = PositionModel(
+                bot_session_id=bot_session_id,
+                symbol=symbol,
+                side=position.side.value,
+                quantity=position.quantity,
+                entry_price=position.entry_price,
+                unrealized_pnl=position.unrealized_pnl,
+                leverage=position.leverage,
+                status="open",
+            )
+            self.session.add(current)
+        else:
+            current.side = position.side.value
+            current.quantity = position.quantity
+            current.entry_price = position.entry_price
+            current.unrealized_pnl = position.unrealized_pnl
+            current.leverage = position.leverage
+        self.session.flush()
+        return current
 
 
 class ConfigRepository:

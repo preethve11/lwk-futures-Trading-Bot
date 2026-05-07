@@ -8,6 +8,7 @@ Usage:
   python main.py monte-carlo [--config config.yaml]
   python main.py db-upgrade [--config config.yaml]
   python main.py db-current [--config config.yaml]
+  python main.py reconcile-lifecycle [--config config.yaml]
   python main.py recover-unprotected [--config config.yaml]
   python main.py live [--config config.yaml]
   python main.py api [--config config.yaml]
@@ -38,6 +39,7 @@ from app.market_data.binance_ws import BinanceKlineStreamService
 from app.market_data.redis_store import RedisKlineStore
 from app.persistence.database import create_session_factory, init_db, session_scope
 from app.persistence.repositories import TradeRepository
+from app.workers.exchange_lifecycle import ExchangeLifecycleReconciliationWorker
 from app.strategies.registry import create_default_strategy_registry
 from app.workers.failed_unprotected_recovery import FailedUnprotectedRecoveryWorker
 from app.workers.live_trader import LiveTrader
@@ -459,6 +461,51 @@ def run_recover_unprotected(config_path: Path | None, limit: int) -> int:
         alert_queue.stop(drain=True)
 
 
+def run_reconcile_lifecycle(config_path: Path | None, limit: int) -> int:
+    """Run one exchange lifecycle reconciliation sweep."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    logger = logging.getLogger("trading_bot.exchange_lifecycle")
+    if not settings.active_binance_api_key or not settings.active_binance_api_secret:
+        logger.error("Lifecycle reconciliation needs active Binance API keys")
+        return 1
+
+    session_factory = create_session_factory(settings.database_url)
+    try:
+        init_db(session_factory)
+    except Exception as exc:
+        logger.exception("Could not initialize persistence database", extra={"error": str(exc)})
+
+    alert_queue = AlertQueue(
+        bot_token=settings.telegram_bot_token,
+        chat_id=settings.telegram_chat_id,
+    )
+    try:
+        worker = ExchangeLifecycleReconciliationWorker(
+            session_factory=session_factory,
+            client=BinanceFuturesClient(
+                settings.active_binance_api_key,
+                settings.active_binance_api_secret,
+                testnet=settings.use_testnet,
+            ),
+            alert_queue=alert_queue,
+        )
+        summary = worker.reconcile_once(symbols=settings.symbols or [settings.symbol], order_limit=limit)
+        print("\n--- Exchange Lifecycle Reconciliation ---")
+        print(f"Orders polled: {summary.orders_polled}")
+        print(f"Orders updated: {summary.orders_updated}")
+        print(f"Missing statuses: {summary.missing_order_statuses}")
+        print(f"Terminal order events: {summary.terminal_order_events}")
+        print(f"Positions synced: {summary.positions_synced}")
+        print(f"Drift events: {summary.drift_events}")
+        print(f"Stale reduce-only orders cancelled: {summary.stale_orders_cancelled}")
+        print(f"Cancel failures: {summary.cancel_failures}")
+        print(f"Errors: {len(summary.errors)}")
+        return 1 if summary.errors or summary.cancel_failures else 0
+    finally:
+        alert_queue.stop(drain=True)
+
+
 def _alembic_config(database_url: str):
     from alembic.config import Config as AlembicConfig
 
@@ -499,6 +546,7 @@ def main() -> int:
             "monte-carlo",
             "db-upgrade",
             "db-current",
+            "reconcile-lifecycle",
             "recover-unprotected",
             "live",
             "api",
@@ -506,7 +554,7 @@ def main() -> int:
         ],
         help=(
             "Run backtest, backtest-multi, walk-forward, monte-carlo, db-upgrade, db-current, "
-            "recover-unprotected, live, api, or market-data"
+            "reconcile-lifecycle, recover-unprotected, live, api, or market-data"
         ),
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
@@ -541,6 +589,8 @@ def main() -> int:
         return run_db_upgrade(args.config, args.revision)
     if args.mode == "db-current":
         return run_db_current(args.config)
+    if args.mode == "reconcile-lifecycle":
+        return run_reconcile_lifecycle(args.config, args.limit)
     if args.mode == "recover-unprotected":
         return run_recover_unprotected(args.config, args.limit)
     if args.mode == "api":

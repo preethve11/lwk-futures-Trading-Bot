@@ -8,6 +8,7 @@ from collections.abc import Callable
 from functools import wraps
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pandas as pd
@@ -16,7 +17,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 from trading_bot.core.types import Position, Signal, SignalSide
-from trading_bot.execution.base import ExecutionClient, OrderResult, ProtectedOrderResult
+from trading_bot.execution.base import ExchangeOrderStatus, ExecutionClient, OrderResult, ProtectedOrderResult
 from trading_bot.utils.exchange_filters import round_price, parse_symbol_filters
 
 logger = logging.getLogger("trading_bot.execution.binance")
@@ -210,3 +211,73 @@ class BinanceFuturesClient(ExecutionClient):
         except Exception as e:
             logger.exception("fetch_recent_trades: %s", e)
             return []
+
+    @retry_on_rate_limit(max_retries=2)
+    def get_order_status(self, symbol: str, order_id: str) -> ExchangeOrderStatus | None:
+        try:
+            raw = self._client.futures_get_order(symbol=symbol, orderId=order_id)
+        except BinanceAPIException as e:
+            logger.exception("Could not fetch Binance order status: %s", e)
+            return None
+        return ExchangeOrderStatus(
+            order_id=str(raw.get("orderId") or order_id),
+            symbol=str(raw.get("symbol") or symbol),
+            status=str(raw.get("status") or "").upper(),
+            order_type=str(raw.get("type") or raw.get("origType") or "").upper(),
+            side=str(raw.get("side") or "").upper(),
+            price=_float_or_none(raw.get("price")),
+            stop_price=_float_or_none(raw.get("stopPrice")),
+            original_quantity=_float_or_none(raw.get("origQty")),
+            executed_quantity=_float_or_none(raw.get("executedQty")),
+            avg_price=_float_or_none(raw.get("avgPrice")),
+            reduce_only=_bool_value(raw.get("reduceOnly")),
+            update_time=_datetime_from_millis(raw.get("updateTime")),
+            raw_response=dict(raw),
+        )
+
+    @retry_on_rate_limit(max_retries=2)
+    def cancel_order(self, symbol: str, order_id: str) -> OrderResult:
+        try:
+            raw = self._client.futures_cancel_order(symbol=symbol, orderId=order_id)
+            return OrderResult(
+                success=True,
+                order_id=str(raw.get("orderId") or order_id),
+                message=str(raw.get("status") or "cancel submitted"),
+            )
+        except BinanceAPIException as e:
+            logger.exception("Could not cancel Binance order: %s", e)
+            return OrderResult(success=False, order_id=order_id, message=str(e))
+
+
+def _float_or_none(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    if isinstance(value, int):
+        return value != 0
+    return False
+
+
+def _datetime_from_millis(value: object) -> datetime | None:
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return None
+    try:
+        millis = int(value)
+    except (TypeError, ValueError):
+        return None
+    if millis <= 0:
+        return None
+    return datetime.fromtimestamp(millis / 1000.0, tz=timezone.utc)
