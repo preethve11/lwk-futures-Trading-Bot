@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     account_reconciliation_interval_seconds: int = Field(default=300, gt=0)
     account_equity_drift_threshold_usd: float = Field(default=25.0, ge=0)
     account_equity_drift_threshold_pct: float = Field(default=5.0, ge=0)
+    live_strategy_gate_enabled: bool = False
+    live_strategy_gate_required_for_mainnet: bool = True
+    live_gate_min_trades: int = Field(default=20, ge=0)
+    live_gate_min_profit_factor: float = Field(default=1.1, ge=0)
+    live_gate_min_expectancy_usd: float = Field(default=0.0)
+    live_gate_min_sharpe: float = Field(default=0.0)
+    live_gate_max_drawdown_pct: float = Field(default=20.0, gt=0, le=100)
+    live_gate_max_backtest_age_days: int = Field(default=30, gt=0)
 
     @field_validator("symbol", mode="before")
     @classmethod
@@ -278,5 +286,13 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "account_reconciliation_interval_seconds": monitoring.get("account_reconciliation_interval_seconds"),
         "account_equity_drift_threshold_usd": monitoring.get("account_equity_drift_threshold_usd"),
         "account_equity_drift_threshold_pct": monitoring.get("account_equity_drift_threshold_pct"),
+        "live_strategy_gate_enabled": monitoring.get("live_strategy_gate_enabled"),
+        "live_strategy_gate_required_for_mainnet": monitoring.get("live_strategy_gate_required_for_mainnet"),
+        "live_gate_min_trades": monitoring.get("live_gate_min_trades"),
+        "live_gate_min_profit_factor": monitoring.get("live_gate_min_profit_factor"),
+        "live_gate_min_expectancy_usd": monitoring.get("live_gate_min_expectancy_usd"),
+        "live_gate_min_sharpe": monitoring.get("live_gate_min_sharpe"),
+        "live_gate_max_drawdown_pct": monitoring.get("live_gate_max_drawdown_pct"),
+        "live_gate_max_backtest_age_days": monitoring.get("live_gate_max_backtest_age_days"),
     }
     return {key: value for key, value in values.items() if value is not None}

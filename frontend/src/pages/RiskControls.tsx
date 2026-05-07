@@ -8,6 +8,7 @@ import { formatDateTime } from '../utils/format';
 export function RiskControls({ data }: { data: DashboardData }) {
   const [pending, setPending] = useState(false);
   const riskState = data.riskState;
+  const performanceGate = data.performanceGate;
 
   const update = async (payload: Parameters<typeof data.updateRiskState>[0]) => {
     setPending(true);
@@ -74,6 +75,31 @@ export function RiskControls({ data }: { data: DashboardData }) {
           <span>Reason</span>
           <strong>{riskState?.reason || 'No active operator note'}</strong>
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Strategy Gate</h2>
+          <span>{performanceGate?.allowed ? 'passed' : 'blocked'}</span>
+        </div>
+        {performanceGate ? (
+          <div className="facts-grid">
+            <span>Status</span>
+            <strong className={performanceGate.allowed ? 'positive' : 'negative'}>{performanceGate.allowed ? 'Allowed' : 'Blocked'}</strong>
+            <span>Reason</span>
+            <strong>{performanceGate.reason}</strong>
+            <span>Run</span>
+            <strong>{performanceGate.backtest_run_id ?? 'No run'}</strong>
+            <span>Profit Factor</span>
+            <strong>{performanceGate.metrics.profit_factor ?? 'n/a'}</strong>
+            <span>Trades</span>
+            <strong>{performanceGate.metrics.total_trades ?? 0}</strong>
+            <span>Max Drawdown</span>
+            <strong>{performanceGate.metrics.max_drawdown_pct ?? 'n/a'}%</strong>
+          </div>
+        ) : (
+          <div className="empty-state">No strategy gate result</div>
+        )}
       </section>
     </div>
   );

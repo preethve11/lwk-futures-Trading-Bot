@@ -57,6 +57,7 @@ def evaluate_mainnet_readiness(settings: Settings, *, small_notional_usd: float 
         _risk_per_trade_check(settings, small_notional_usd),
         _daily_loss_check(settings, small_notional_usd),
         _drawdown_check(settings),
+        _strategy_gate_check(settings),
         _alerting_check(settings),
         _account_reconciliation_check(settings, small_notional_usd),
         _market_data_check(settings),
@@ -208,6 +209,26 @@ def _drawdown_check(settings: Settings) -> ReadinessCheck:
         status=ReadinessStatus.WARN,
         detail=f"MAX_DRAWDOWN_PCT={settings.max_drawdown_pct:.2f} is not conservative for first mainnet.",
         remediation="Use 10% or lower for first small-notional validation.",
+    )
+
+
+def _strategy_gate_check(settings: Settings) -> ReadinessCheck:
+    if settings.live_strategy_gate_required_for_mainnet:
+        return ReadinessCheck(
+            name="Strategy performance gate",
+            status=ReadinessStatus.PASS,
+            detail=(
+                "Mainnet live startup requires the latest backtest to pass "
+                f"{settings.live_gate_min_trades} trades, profit factor {settings.live_gate_min_profit_factor:.2f}, "
+                f"expectancy {settings.live_gate_min_expectancy_usd:.2f}, Sharpe {settings.live_gate_min_sharpe:.2f}, "
+                f"and max drawdown {settings.live_gate_max_drawdown_pct:.2f}%."
+            ),
+        )
+    return ReadinessCheck(
+        name="Strategy performance gate",
+        status=ReadinessStatus.FAIL,
+        detail="LIVE_STRATEGY_GATE_REQUIRED_FOR_MAINNET is false.",
+        remediation="Keep the strategy performance gate required for mainnet live trading.",
     )
 
 

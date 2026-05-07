@@ -97,3 +97,11 @@ monitoring:
   account_reconciliation_interval_seconds: 300
   account_equity_drift_threshold_usd: 25.0
   account_equity_drift_threshold_pct: 5.0
+  live_strategy_gate_enabled: false
+  live_strategy_gate_required_for_mainnet: true
+  live_gate_min_trades: 20
+  live_gate_min_profit_factor: 1.1
+  live_gate_min_expectancy_usd: 0.0
+  live_gate_min_sharpe: 0.0
+  live_gate_max_drawdown_pct: 20.0
+  live_gate_max_backtest_age_days: 30

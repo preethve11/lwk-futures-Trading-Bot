@@ -254,6 +254,23 @@ class RiskEventResponse(BaseModel):
     created_at: datetime
 
 
+class PerformanceGateViolationResponse(BaseModel):
+    field: str
+    actual: float | int | str | None
+    required: float | int | str
+    message: str
+
+
+class PerformanceGateResponse(BaseModel):
+    allowed: bool
+    reason: str
+    backtest_run_id: str | None
+    symbol: str | None
+    strategy_name: str | None
+    metrics: dict[str, float | int | None]
+    violations: list[PerformanceGateViolationResponse]
+
+
 class AIReportResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

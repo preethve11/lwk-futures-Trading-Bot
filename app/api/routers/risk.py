@@ -7,9 +7,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db, require_api_token
-from app.api.schemas import KillSwitchRequest, RiskEventResponse, RiskStateResponse, RiskStateUpdateRequest
+from app.api.dependencies import get_app_settings, get_db, require_api_token
+from app.api.schemas import (
+    KillSwitchRequest,
+    PerformanceGateResponse,
+    RiskEventResponse,
+    RiskStateResponse,
+    RiskStateUpdateRequest,
+)
 from app.api.services import RiskService
+from app.core.config import Settings
+from app.ops.performance_gate import evaluate_strategy_performance_gate
 from app.persistence.models import RiskEventModel
 from app.persistence.repositories import RiskEventRepository
 from app.persistence.models import RiskStateModel
@@ -69,3 +77,11 @@ def list_risk_events(
     limit: int = 100,
 ) -> list[RiskEventModel]:
     return RiskEventRepository(db).list_recent(symbol=symbol, limit=limit)
+
+
+@router.get("/performance-gate", response_model=PerformanceGateResponse)
+def get_performance_gate(
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> dict[str, object]:
+    return evaluate_strategy_performance_gate(db, settings).to_dict()

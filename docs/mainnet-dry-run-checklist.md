@@ -20,6 +20,7 @@ The command does not call Binance and does not place orders. It validates local 
 - drawdown lock
 - Telegram alert readiness
 - account/equity reconciliation thresholds
+- strategy performance gate enforcement
 - market-data source
 
 Use `--allow-failures` only for rehearsal output in local/testnet environments.
@@ -35,9 +36,10 @@ Use `--allow-failures` only for rehearsal output in local/testnet environments.
 7. Confirm Telegram receives an INFO test alert from a non-order path.
 8. Run `py main.py reconcile-account --asset USDT` and compare wallet/equity with Binance.
 9. Run `py main.py reconcile-lifecycle --limit 100` and confirm no unexpected open position/order drift.
-10. Confirm Binance account mode, leverage, margin mode, and symbol filters manually in Binance.
-11. Confirm no open positions and no stale reduce-only orders on Binance.
-12. Confirm API keys are restricted to required futures permissions and have withdrawal disabled.
+10. Run `py main.py strategy-gate` and confirm the latest validation run passes.
+11. Confirm Binance account mode, leverage, margin mode, and symbol filters manually in Binance.
+12. Confirm no open positions and no stale reduce-only orders on Binance.
+13. Confirm API keys are restricted to required futures permissions and have withdrawal disabled.
 
 ## Mainnet Configuration Window
 
@@ -51,6 +53,7 @@ MAX_DAILY_LOSS_USD=3
 MAX_DRAWDOWN_PCT=10
 ACCOUNT_EQUITY_DRIFT_THRESHOLD_USD=1
 DATABASE_AUTO_CREATE_TABLES=false
+LIVE_STRATEGY_GATE_REQUIRED_FOR_MAINNET=true
 ```
 
 Keep a Binance browser session open and ready to manually close positions.

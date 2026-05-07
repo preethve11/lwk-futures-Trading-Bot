@@ -217,6 +217,7 @@ def test_repository_backed_read_endpoints() -> None:
     ai_reports = client.get("/ai-reports", headers=_headers())
     exchange_fills = client.get("/exchange-fills", headers=_headers())
     account_snapshots = client.get("/account/snapshots", headers=_headers())
+    performance_gate = client.get("/risk/performance-gate", headers=_headers())
 
     assert trades.status_code == 200
     assert trades.json()[0]["symbol"] == "ZECUSDT"
@@ -238,6 +239,9 @@ def test_repository_backed_read_endpoints() -> None:
     assert exchange_fills.json()[0]["exchange_trade_id"] == "9001"
     assert account_snapshots.status_code == 200
     assert account_snapshots.json()[0]["margin_balance"] == 10012.0
+    assert performance_gate.status_code == 200
+    assert performance_gate.json()["allowed"] is False
+    assert performance_gate.json()["violations"][0]["field"] == "total_trades"
 
 
 def test_readiness_endpoint_checks_database() -> None:

@@ -51,6 +51,22 @@ describe('App', () => {
             )
           );
         }
+        if (url.endsWith('/risk/performance-gate')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                allowed: false,
+                reason: 'No backtest run found',
+                backtest_run_id: null,
+                symbol: 'ZECUSDT',
+                strategy_name: 'ema_rsi_vwap',
+                metrics: {},
+                violations: [{ field: 'backtest_run', actual: null, required: 'latest relevant backtest', message: 'Run a backtest' }]
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }
+            )
+          );
+        }
         if (emptyArrayEndpoints.some((path) => url.endsWith(path))) {
           return Promise.resolve(new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
         }

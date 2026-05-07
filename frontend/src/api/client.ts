@@ -8,6 +8,7 @@ import type {
   LiveEvent,
   MultiBacktestRunRequest,
   MultiBacktestRunResult,
+  PerformanceGate,
   Position,
   RiskEvent,
   RiskState,
@@ -44,6 +45,7 @@ export const apiClient = {
   getPositions: () => request<Position[]>('/positions'),
   getRiskState: () => request<RiskState>('/risk/state'),
   getRiskEvents: () => request<RiskEvent[]>('/risk/events'),
+  getPerformanceGate: () => request<PerformanceGate>('/risk/performance-gate'),
   getAccountSnapshots: () => request<AccountSnapshot[]>('/account/snapshots?limit=250'),
   runMultiBacktest: (payload: MultiBacktestRunRequest) =>
     request<MultiBacktestRunResult>('/backtests/run-multi', {
@@ -73,6 +75,7 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
     positions,
     riskState,
     riskEvents,
+    performanceGate,
     accountSnapshots
   ] = await Promise.all([
     apiClient.getConfigs(),
@@ -84,10 +87,23 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
     apiClient.getPositions(),
     apiClient.getRiskState(),
     apiClient.getRiskEvents(),
+    apiClient.getPerformanceGate(),
     apiClient.getAccountSnapshots()
   ]);
 
-  return { configs, backtests, trades, signals, aiReports, sessions, positions, riskState, riskEvents, accountSnapshots };
+  return {
+    configs,
+    backtests,
+    trades,
+    signals,
+    aiReports,
+    sessions,
+    positions,
+    riskState,
+    riskEvents,
+    performanceGate,
+    accountSnapshots
+  };
 }
 
 export function connectLiveEvents(onEvent: (event: LiveEvent) => void, onError: () => void): WebSocket | null {

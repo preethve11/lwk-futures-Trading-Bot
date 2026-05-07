@@ -19,24 +19,27 @@ This protocol is for a single supervised real-money validation after testnet and
 5. Enable the dashboard kill switch before any live process starts.
 6. Run account reconciliation and confirm wallet/equity matches Binance.
 7. Run exchange lifecycle reconciliation and confirm no drift.
-8. Disable the kill switch only when Binance, dashboard, alerts, and logs are all visible.
-9. Start `py main.py live` with:
+8. Run `py main.py strategy-gate` and confirm the latest validation evidence passes.
+9. Disable the kill switch only when Binance, dashboard, alerts, and logs are all visible.
+10. Start `py main.py live` with:
    - `USE_TESTNET=false`
    - `CONFIRM_LIVE_TRADING=true`
+   - `LIVE_STRATEGY_GATE_REQUIRED_FOR_MAINNET=true`
    - `RISK_PER_TRADE_USD` at the chosen small risk
    - `MAX_DAILY_LOSS_USD` no more than 3x that small risk
-10. Watch Binance and dashboard until either one protected trade is accepted or the session times out.
-11. After the first entry, confirm stop-loss and take-profit orders exist on Binance.
-12. Run `py main.py reconcile-lifecycle --limit 100`.
-13. If the trade closes, run exchange fill reconciliation via the live loop or recent-fill path and confirm closed PnL appears in API/dashboard.
-14. Stop the live process.
-15. Enable the kill switch.
-16. Run account reconciliation again and compare wallet/equity with Binance.
-17. Export logs, risk events, orders, fills, trades, and account snapshots for review.
+11. Watch Binance and dashboard until either one protected trade is accepted or the session times out.
+12. After the first entry, confirm stop-loss and take-profit orders exist on Binance.
+13. Run `py main.py reconcile-lifecycle --limit 100`.
+14. If the trade closes, run exchange fill reconciliation via the live loop or recent-fill path and confirm closed PnL appears in API/dashboard.
+15. Stop the live process.
+16. Enable the kill switch.
+17. Run account reconciliation again and compare wallet/equity with Binance.
+18. Export logs, risk events, orders, fills, trades, and account snapshots for review.
 
 ## Required Pass Criteria
 
 - Live guard blocks mainnet unless `CONFIRM_LIVE_TRADING=true`.
+- Strategy gate blocks mainnet unless recent validation metrics pass.
 - Dashboard kill switch blocks new trading.
 - Entry order is persisted.
 - SL/TP protection is persisted and visible on Binance.

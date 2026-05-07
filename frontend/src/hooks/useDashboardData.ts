@@ -13,6 +13,7 @@ const emptySnapshot: DashboardSnapshot = {
   positions: [],
   riskState: null,
   riskEvents: [],
+  performanceGate: null,
   accountSnapshots: []
 };
 
@@ -76,7 +77,8 @@ export function useDashboardData() {
       Number(snapshot.riskState?.manual_pause_enabled ?? false) +
       Number(snapshot.riskState?.daily_loss_locked ?? false) +
       Number(snapshot.riskState?.drawdown_locked ?? false) +
-      snapshot.riskEvents.filter((event) => ['CRITICAL', 'EMERGENCY'].includes(event.severity)).length;
+      snapshot.riskEvents.filter((event) => ['CRITICAL', 'EMERGENCY'].includes(event.severity)).length +
+      Number(snapshot.performanceGate?.allowed === false);
 
     return { realizedPnl, latestSession, latestAccountSnapshot, accountEquityCurve, currentPosition, openRiskItems };
   }, [snapshot]);

@@ -149,6 +149,23 @@ export interface RiskEvent {
   created_at: string;
 }
 
+export interface PerformanceGateViolation {
+  field: string;
+  actual: number | string | null;
+  required: number | string;
+  message: string;
+}
+
+export interface PerformanceGate {
+  allowed: boolean;
+  reason: string;
+  backtest_run_id: string | null;
+  symbol: string | null;
+  strategy_name: string | null;
+  metrics: Record<string, number | null>;
+  violations: PerformanceGateViolation[];
+}
+
 export interface AIReport {
   id: number;
   bot_session_id: number | null;
@@ -196,6 +213,7 @@ export interface DashboardSnapshot {
   positions: Position[];
   riskState: RiskState | null;
   riskEvents: RiskEvent[];
+  performanceGate: PerformanceGate | null;
   aiReports: AIReport[];
   accountSnapshots: AccountSnapshot[];
 }

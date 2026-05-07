@@ -32,6 +32,7 @@ The bot supports:
 - max drawdown lock
 - manual pause
 - API/dashboard kill switch
+- strategy performance gate before live promotion
 - min notional enforcement
 - min risk-reward enforcement
 - optional ATR volatility position cap
@@ -82,6 +83,7 @@ Before mainnet:
 
 - CI green on the target branch.
 - `py main.py mainnet-checklist --small-notional-usd 10` reviewed with no unresolved failures.
+- `py main.py strategy-gate` passes against recent persisted validation evidence.
 - Testnet trade lifecycle tested end to end.
 - Emergency close path tested on testnet.
 - Dashboard kill switch tested.
@@ -95,4 +97,5 @@ Detailed runbooks:
 
 - [Mainnet dry-run checklist](mainnet-dry-run-checklist.md)
 - [Small-notional mainnet test protocol](small-notional-test-protocol.md)
+- [Strategy performance gate](strategy-performance-gate.md)
 

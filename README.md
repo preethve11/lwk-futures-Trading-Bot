@@ -164,6 +164,9 @@ py main.py db-current
 # Mainnet readiness, read-only
 py main.py mainnet-checklist --small-notional-usd 10
 
+# Strategy live-promotion gate
+py main.py strategy-gate
+
 # Account/equity reconciliation
 py main.py reconcile-account --asset USDT
 
@@ -186,6 +189,7 @@ Key endpoints:
 - `GET /trades`, `GET /trades/{id}`
 - `GET /sessions`, `POST /sessions/start`, `POST /sessions/stop`
 - `GET /risk/state`, `POST /risk/state`, `POST /risk/kill-switch`, `GET /risk/events`
+- `GET /risk/performance-gate`
 - `GET /signals`
 - `GET /positions`
 - `GET /account/snapshots`
@@ -203,6 +207,7 @@ This project is deliberately conservative:
 - SL/TP protection is verified after entry.
 - Failed protection can trigger emergency close and manual review.
 - Live account equity is persisted from Binance wallet state and drift emits operator alerts.
+- Mainnet live trading can be blocked by the strategy performance gate when recent backtest metrics are weak or stale.
 - AI reports are advisory-only and cannot call execution clients or mutate state.
 - Metrics and logs are operational aids, not trading signals.
 
@@ -231,6 +236,8 @@ Database migrations: [docs/database-migrations.md](docs/database-migrations.md)
 Mainnet readiness: [docs/mainnet-dry-run-checklist.md](docs/mainnet-dry-run-checklist.md)
 
 Small-notional test protocol: [docs/small-notional-test-protocol.md](docs/small-notional-test-protocol.md)
+
+Strategy gate: [docs/strategy-performance-gate.md](docs/strategy-performance-gate.md)
 
 ## Repository Map
 

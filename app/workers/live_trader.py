@@ -12,6 +12,7 @@ from app.ai.journal import AIJournalQueue, AIJournalRequest, AIJournalService, O
 from app.core.config import Settings
 from app.core.security import assert_live_trading_allowed
 from app.market_data.provider import MarketDataProvider, RedisMarketDataProvider
+from app.ops.performance_gate import evaluate_strategy_performance_gate
 from app.persistence.database import SessionFactory, create_session_factory, init_db, session_scope
 from app.persistence.repositories import (
     BotSessionRepository,
@@ -61,13 +62,14 @@ class LiveTrader:
     def run_forever(self) -> int:
         """Run the live trading loop until interrupted."""
         assert_live_trading_allowed(self.settings)
+        session_factory = self._create_runtime_session_factory()
+        self._assert_strategy_performance_gate(session_factory)
         client = self.client or self._create_client()
         client.set_leverage(self.settings.symbol, self.settings.leverage)
 
         symbol_info = client.get_symbol_info(self.settings.symbol)
         risk_manager = self._create_risk_manager(symbol_info)
         strategy = self.strategy_registry.create(self.settings.strategy_name, self.settings)
-        session_factory = self._create_runtime_session_factory()
         ai_journal_queue = self.ai_journal_queue or self._create_ai_journal_queue(session_factory)
         bot_session_id = self._start_bot_session(session_factory)
         reconciliation_worker = ReconciliationWorker(client, self.alert_queue)
@@ -387,6 +389,30 @@ class LiveTrader:
         except Exception as exc:
             self.logger.exception("Could not initialize persistence database", extra={"error": str(exc)})
         return session_factory
+
+    def _assert_strategy_performance_gate(self, session_factory: SessionFactory) -> None:
+        required = self.settings.live_strategy_gate_enabled or (
+            not self.settings.use_testnet and self.settings.live_strategy_gate_required_for_mainnet
+        )
+        if not required:
+            return
+        try:
+            with session_scope(session_factory) as session:
+                result = evaluate_strategy_performance_gate(session, self.settings)
+        except Exception as exc:
+            self.logger.exception("Could not evaluate strategy performance gate", extra={"error": str(exc)})
+            raise RuntimeError("Strategy performance gate could not be evaluated") from exc
+        if result.allowed:
+            self.logger.info(
+                "Strategy performance gate passed",
+                extra={"backtest_run_id": result.backtest_run_id, "symbol": result.symbol},
+            )
+            return
+        self.logger.critical(
+            "Strategy performance gate blocked live trading",
+            extra={"reason": result.reason, "violations": [violation.to_dict() for violation in result.violations]},
+        )
+        raise RuntimeError(f"Live trading blocked by strategy performance gate: {result.reason}")
 
     def _create_ai_journal_queue(self, session_factory: SessionFactory) -> AIJournalQueue:
         if not self.settings.ai_journal_enabled or not self.settings.openai_api_key:

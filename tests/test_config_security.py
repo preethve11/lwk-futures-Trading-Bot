@@ -32,6 +32,10 @@ monitoring:
   account_reconciliation_interval_seconds: 120
   account_equity_drift_threshold_usd: 15
   account_equity_drift_threshold_pct: 2.5
+  live_strategy_gate_enabled: true
+  live_gate_min_trades: 40
+  live_gate_min_profit_factor: 1.2
+  live_gate_max_drawdown_pct: 12
 """,
         encoding="utf-8",
     )
@@ -50,6 +54,10 @@ monitoring:
     assert settings.account_reconciliation_interval_seconds == 120
     assert settings.account_equity_drift_threshold_usd == 15
     assert settings.account_equity_drift_threshold_pct == 2.5
+    assert settings.live_strategy_gate_enabled is True
+    assert settings.live_gate_min_trades == 40
+    assert settings.live_gate_min_profit_factor == 1.2
+    assert settings.live_gate_max_drawdown_pct == 12
 
 
 def test_active_binance_keys_follow_testnet_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
