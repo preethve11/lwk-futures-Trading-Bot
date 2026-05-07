@@ -12,6 +12,7 @@ sequenceDiagram
     participant Risk as RiskManager
     participant Exchange as Binance Client
     participant Recon as ReconciliationWorker
+    participant Account as AccountEquityWorker
     participant DB as Repositories
     participant Alerts as Alert Queue
 
@@ -34,6 +35,10 @@ sequenceDiagram
         Worker->>DB: persist rejection
         Worker->>Alerts: enqueue warning
     end
+    Worker->>Account: periodic wallet/equity reconciliation
+    Account->>Exchange: fetch futures account state
+    Account->>DB: persist account snapshot and drift event
+    Account->>Alerts: enqueue drift alert when thresholds breach
 ```
 
 ## Main Packages
@@ -63,11 +68,14 @@ erDiagram
     BOT_SESSIONS ||--o{ TRADES : closes
     BOT_SESSIONS ||--o{ RISK_EVENTS : emits
     BOT_SESSIONS ||--o{ AI_REPORTS : explains
+    BOT_SESSIONS ||--o{ EXCHANGE_FILLS : reconciles
+    BOT_SESSIONS ||--o{ ACCOUNT_SNAPSHOTS : tracks
     SIGNALS ||--o{ ORDERS : triggers
     SIGNALS ||--o{ TRADES : links
     SIGNALS ||--o{ AI_REPORTS : explains
     ORDERS ||--o{ TRADES : fills
     TRADES ||--o{ AI_REPORTS : reviews
+    TRADES ||--o{ EXCHANGE_FILLS : creates
 ```
 
 Models currently include:
@@ -79,6 +87,8 @@ Models currently include:
 - `OrderModel`
 - `PositionModel`
 - `TradeModel`
+- `ExchangeFillModel`
+- `AccountSnapshotModel`
 - `RiskEventModel`
 - `BacktestRunModel`
 - `AIReportModel`
@@ -95,6 +105,10 @@ Order protection state is tracked through:
 - `FAILED_UNPROTECTED`
 
 After a market entry, reconciliation verifies stop-loss and take-profit protection on Binance. Missing protection is retried with backoff. If protection is still absent, the worker can trigger emergency close, persist manual-review state, and emit critical alerts.
+
+Exchange lifecycle reconciliation polls order status, aggregates partial fills, syncs position snapshots, detects position drift, and cancels stale reduce-only protection when Binance reports the account is flat.
+
+Account equity reconciliation polls Binance wallet state, persists a live equity curve, exposes dashboard/API visibility, and emits balance drift alerts when configured thresholds are breached.
 
 ## API And Dashboard
 
@@ -132,9 +146,8 @@ docker compose --profile monitoring up --build
 
 ## Deferred Production Hardening
 
-- Alembic migration runner.
-- Exchange-led fill reconciliation from Binance user-data streams.
 - Full backup and restore automation.
 - TLS/reverse proxy automation.
 - More extensive dashboard and WebSocket tests.
+- Exchange-led fill reconciliation from Binance user-data streams.
 

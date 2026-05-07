@@ -121,6 +121,9 @@ class Settings(BaseSettings):
     metrics_include_database: bool = True
     metrics_token: str = ""
     readiness_check_database: bool = True
+    account_reconciliation_interval_seconds: int = Field(default=300, gt=0)
+    account_equity_drift_threshold_usd: float = Field(default=25.0, ge=0)
+    account_equity_drift_threshold_pct: float = Field(default=5.0, ge=0)
 
     @field_validator("symbol", mode="before")
     @classmethod
@@ -272,5 +275,8 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "metrics_include_database": monitoring.get("metrics_include_database"),
         "metrics_token": monitoring.get("metrics_token"),
         "readiness_check_database": monitoring.get("readiness_check_database"),
+        "account_reconciliation_interval_seconds": monitoring.get("account_reconciliation_interval_seconds"),
+        "account_equity_drift_threshold_usd": monitoring.get("account_equity_drift_threshold_usd"),
+        "account_equity_drift_threshold_pct": monitoring.get("account_equity_drift_threshold_pct"),
     }
     return {key: value for key, value in values.items() if value is not None}

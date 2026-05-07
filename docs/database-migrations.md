@@ -36,6 +36,9 @@ before starting long-running API or trading services.
 - `migrations/env.py`: loads `app.persistence.models.Base.metadata`.
 - `migrations/script.py.mako`: revision template.
 - `migrations/versions/20260506_0001_initial_schema.py`: baseline schema for the current platform.
+- `migrations/versions/20260506_0002_exchange_fills.py`: exchange fill ledger and trade exchange IDs.
+- `migrations/versions/20260507_0003_order_lifecycle_fields.py`: lifecycle reconciliation columns on orders.
+- `migrations/versions/20260507_0004_account_snapshots.py`: live account/equity snapshots.
 
 The older raw SQL files in `migrations/` are retained as historical transition scripts from the pre-Alembic phase. New schema changes should use Alembic revisions under `migrations/versions/`.
 

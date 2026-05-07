@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.persistence.database import SessionFactory, session_scope
 from app.persistence.models import (
     AIReportModel,
+    AccountSnapshotModel,
     BacktestRunModel,
     BotSessionModel,
     ExchangeFillModel,
@@ -93,6 +94,24 @@ class AppMetrics:
             ("table",),
             registry=self.registry,
         )
+        self._account_equity = Gauge(
+            "trading_bot_account_equity",
+            "Latest persisted live account margin balance by asset.",
+            ("asset",),
+            registry=self.registry,
+        )
+        self._account_wallet_balance = Gauge(
+            "trading_bot_account_wallet_balance",
+            "Latest persisted live account wallet balance by asset.",
+            ("asset",),
+            registry=self.registry,
+        )
+        self._account_available_balance = Gauge(
+            "trading_bot_account_available_balance",
+            "Latest persisted live account available balance by asset.",
+            ("asset",),
+            registry=self.registry,
+        )
         self._db_readiness = Gauge(
             "trading_bot_database_ready",
             "Database readiness; 1 means the latest readiness query succeeded.",
@@ -164,6 +183,22 @@ class AppMetrics:
                 self._set_record_count("backtest_runs", session.scalar(select(func.count(BacktestRunModel.id))) or 0)
                 self._set_record_count("ai_reports", session.scalar(select(func.count(AIReportModel.id))) or 0)
                 self._set_record_count("exchange_fills", session.scalar(select(func.count(ExchangeFillModel.id))) or 0)
+                self._set_record_count(
+                    "account_snapshots",
+                    session.scalar(select(func.count(AccountSnapshotModel.id))) or 0,
+                )
+                latest_account = session.scalar(
+                    select(AccountSnapshotModel).order_by(
+                        AccountSnapshotModel.event_time.desc(),
+                        AccountSnapshotModel.id.desc(),
+                    )
+                )
+                if latest_account is not None:
+                    self._account_equity.labels(asset=latest_account.asset).set(latest_account.margin_balance)
+                    self._account_wallet_balance.labels(asset=latest_account.asset).set(latest_account.wallet_balance)
+                    self._account_available_balance.labels(asset=latest_account.asset).set(
+                        latest_account.available_balance
+                    )
         except SQLAlchemyError as exc:
             self._db_readiness.set(0)
             return ReadinessCheck(status="degraded", details={"database": str(exc)})

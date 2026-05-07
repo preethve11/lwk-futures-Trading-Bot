@@ -32,6 +32,7 @@ def test_alembic_upgrade_head_creates_current_schema(tmp_path: Path) -> None:
     order_columns = {column["name"] for column in inspector.get_columns("orders")}
     trade_columns = {column["name"] for column in inspector.get_columns("trades")}
     exchange_fill_columns = {column["name"] for column in inspector.get_columns("exchange_fills")}
+    account_snapshot_columns = {column["name"] for column in inspector.get_columns("account_snapshots")}
 
     assert "alembic_version" in tables
     assert {
@@ -46,6 +47,7 @@ def test_alembic_upgrade_head_creates_current_schema(tmp_path: Path) -> None:
         "backtest_runs",
         "ai_reports",
         "exchange_fills",
+        "account_snapshots",
     }.issubset(tables)
     assert {
         "stop_order_id",
@@ -69,6 +71,14 @@ def test_alembic_upgrade_head_creates_current_schema(tmp_path: Path) -> None:
         "commission",
         "raw_payload",
     }.issubset(exchange_fill_columns)
+    assert {
+        "asset",
+        "wallet_balance",
+        "unrealized_pnl",
+        "margin_balance",
+        "available_balance",
+        "event_time",
+    }.issubset(account_snapshot_columns)
 
 
 def test_api_startup_can_skip_auto_create_tables(tmp_path: Path) -> None:

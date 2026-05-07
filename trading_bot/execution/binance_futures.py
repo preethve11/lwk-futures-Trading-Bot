@@ -17,7 +17,13 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 from trading_bot.core.types import Position, Signal, SignalSide
-from trading_bot.execution.base import ExchangeOrderStatus, ExecutionClient, OrderResult, ProtectedOrderResult
+from trading_bot.execution.base import (
+    AccountSnapshot,
+    ExchangeOrderStatus,
+    ExecutionClient,
+    OrderResult,
+    ProtectedOrderResult,
+)
 from trading_bot.utils.exchange_filters import round_price, parse_symbol_filters
 
 logger = logging.getLogger("trading_bot.execution.binance")
@@ -248,6 +254,49 @@ class BinanceFuturesClient(ExecutionClient):
             logger.exception("Could not cancel Binance order: %s", e)
             return OrderResult(success=False, order_id=order_id, message=str(e))
 
+    @retry_on_rate_limit(max_retries=2)
+    def get_account_snapshot(self, asset: str = "USDT") -> AccountSnapshot | None:
+        try:
+            raw = self._client.futures_account()
+        except BinanceAPIException as e:
+            logger.exception("Could not fetch Binance account snapshot: %s", e)
+            return None
+        selected_asset = _find_account_asset(raw, asset)
+        wallet_balance = _first_float(
+            raw.get("totalWalletBalance"),
+            selected_asset.get("walletBalance") if selected_asset is not None else None,
+        )
+        unrealized_pnl = _first_float(
+            raw.get("totalUnrealizedProfit"),
+            selected_asset.get("unrealizedProfit") if selected_asset is not None else None,
+        )
+        margin_balance = _first_float(
+            raw.get("totalMarginBalance"),
+            selected_asset.get("marginBalance") if selected_asset is not None else None,
+            wallet_balance + unrealized_pnl,
+        )
+        available_balance = _first_float(
+            raw.get("availableBalance"),
+            selected_asset.get("availableBalance") if selected_asset is not None else None,
+        )
+        max_withdraw_amount = _first_optional_float(
+            raw.get("maxWithdrawAmount"),
+            selected_asset.get("maxWithdrawAmount") if selected_asset is not None else None,
+        )
+        event_time = _datetime_from_millis(raw.get("updateTime"))
+        if event_time is None and selected_asset is not None:
+            event_time = _datetime_from_millis(selected_asset.get("updateTime"))
+        return AccountSnapshot(
+            asset=asset.upper(),
+            wallet_balance=wallet_balance,
+            unrealized_pnl=unrealized_pnl,
+            margin_balance=margin_balance,
+            available_balance=available_balance,
+            max_withdraw_amount=max_withdraw_amount,
+            event_time=event_time,
+            raw_response=dict(raw),
+        )
+
 
 def _float_or_none(value: object) -> float | None:
     if value is None or value == "":
@@ -259,6 +308,33 @@ def _float_or_none(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed
+
+
+def _first_float(*values: object) -> float:
+    for value in values:
+        parsed = _float_or_none(value)
+        if parsed is not None:
+            return parsed
+    return 0.0
+
+
+def _first_optional_float(*values: object) -> float | None:
+    for value in values:
+        parsed = _float_or_none(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _find_account_asset(raw: dict[str, object], asset: str) -> dict[str, object] | None:
+    requested = asset.upper()
+    assets = raw.get("assets")
+    if not isinstance(assets, list):
+        return None
+    for item in assets:
+        if isinstance(item, dict) and str(item.get("asset") or "").upper() == requested:
+            return dict(item)
+    return None
 
 
 def _bool_value(value: object) -> bool:

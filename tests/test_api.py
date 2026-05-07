@@ -11,6 +11,7 @@ from app.persistence.models import PositionModel
 from app.exchange.fills import parse_exchange_fill
 from app.persistence.repositories import (
     AIReportRepository,
+    AccountSnapshotRepository,
     BotSessionRepository,
     ExchangeFillRepository,
     RiskEventRepository,
@@ -19,6 +20,7 @@ from app.persistence.repositories import (
 )
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Signal, SignalSide, Trade
+from trading_bot.execution.base import AccountSnapshot
 
 
 def _client() -> tuple[TestClient, SessionFactory]:
@@ -146,6 +148,19 @@ def _seed_data(factory: SessionFactory) -> None:
             ),
             bot_session_id=bot_session.id,
         )
+        AccountSnapshotRepository(session).create_from_snapshot(
+            AccountSnapshot(
+                asset="USDT",
+                wallet_balance=10_000.0,
+                unrealized_pnl=12.0,
+                margin_balance=10_012.0,
+                available_balance=9_500.0,
+                max_withdraw_amount=9_000.0,
+                event_time=datetime(2026, 1, 1, 2, tzinfo=timezone.utc),
+                raw_response={"source": "test"},
+            ),
+            bot_session_id=bot_session.id,
+        )
 
 
 def test_api_rejects_invalid_token() -> None:
@@ -201,6 +216,7 @@ def test_repository_backed_read_endpoints() -> None:
     risk_events = client.get("/risk/events", headers=_headers())
     ai_reports = client.get("/ai-reports", headers=_headers())
     exchange_fills = client.get("/exchange-fills", headers=_headers())
+    account_snapshots = client.get("/account/snapshots", headers=_headers())
 
     assert trades.status_code == 200
     assert trades.json()[0]["symbol"] == "ZECUSDT"
@@ -220,6 +236,8 @@ def test_repository_backed_read_endpoints() -> None:
     assert ai_reports.json()[0]["report_text"] == "advisory report"
     assert exchange_fills.status_code == 200
     assert exchange_fills.json()[0]["exchange_trade_id"] == "9001"
+    assert account_snapshots.status_code == 200
+    assert account_snapshots.json()[0]["margin_balance"] == 10012.0
 
 
 def test_readiness_endpoint_checks_database() -> None:
@@ -247,6 +265,8 @@ def test_metrics_endpoint_exports_http_and_database_metrics() -> None:
     assert 'trading_bot_risk_events_total{severity="CRITICAL"} 1.0' in response.text
     assert 'trading_bot_persisted_records_total{table="ai_reports"} 1.0' in response.text
     assert 'trading_bot_persisted_records_total{table="exchange_fills"} 1.0' in response.text
+    assert 'trading_bot_persisted_records_total{table="account_snapshots"} 1.0' in response.text
+    assert 'trading_bot_account_equity{asset="USDT"} 10012.0' in response.text
 
 
 def test_metrics_endpoint_requires_token_in_production() -> None:

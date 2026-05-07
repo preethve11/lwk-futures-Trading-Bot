@@ -12,6 +12,7 @@ This repository is built for research, testnet operation, and engineering portfo
 - Strict risk controls: fixed dollar risk, daily loss lock, drawdown lock, risk-reward checks, min notional, manual pause, and kill switch.
 - Binance Futures execution client with symbol-info caching and live trading guard.
 - Order protection state machine and reconciliation worker for SL/TP verification and emergency close.
+- Live account/equity reconciliation with wallet snapshots, drift alerts, dashboard visibility, and Prometheus gauges.
 - SQLAlchemy persistence for sessions, signals, orders, positions, trades, risk events, backtests, and AI reports.
 - Repository layer for database access.
 - FastAPI operator API with token auth, WebSocket live events, readiness, and Prometheus metrics.
@@ -40,6 +41,7 @@ flowchart LR
         RISK["RiskManager"]
         EXEC["Execution Client"]
         RECON["ReconciliationWorker"]
+        ACCOUNT["Account Equity Reconciler"]
     end
 
     subgraph Persistence
@@ -73,7 +75,9 @@ flowchart LR
     STRATEGY --> RISK
     RISK --> EXEC
     EXEC --> RECON
+    EXEC --> ACCOUNT
     RECON --> REPOS
+    ACCOUNT --> REPOS
     RISK --> REPOS
     BACKTEST --> REPOS
     MULTI --> REPOS
@@ -157,6 +161,12 @@ py main.py market-data
 py main.py db-upgrade --revision head
 py main.py db-current
 
+# Account/equity reconciliation
+py main.py reconcile-account --asset USDT
+
+# Exchange lifecycle reconciliation
+py main.py reconcile-lifecycle --limit 100
+
 # Live loop, testnet first
 py main.py live
 ```
@@ -175,6 +185,7 @@ Key endpoints:
 - `GET /risk/state`, `POST /risk/state`, `POST /risk/kill-switch`, `GET /risk/events`
 - `GET /signals`
 - `GET /positions`
+- `GET /account/snapshots`
 - `GET /ai-reports`
 - `WebSocket /ws/live`
 
@@ -188,6 +199,7 @@ This project is deliberately conservative:
 - The live loop must not block on Telegram, AI, or dashboard calls.
 - SL/TP protection is verified after entry.
 - Failed protection can trigger emergency close and manual review.
+- Live account equity is persisted from Binance wallet state and drift emits operator alerts.
 - AI reports are advisory-only and cannot call execution clients or mutate state.
 - Metrics and logs are operational aids, not trading signals.
 
@@ -275,10 +287,10 @@ Completed:
 - Day 6: React dashboard shell and core operator pages.
 - Day 7: multi-symbol backtesting, JSON reports, Docker Compose with Postgres/Redis/frontend/backend.
 - Week 2: market-data WebSocket/Redis service, walk-forward optimizer, Monte Carlo simulation, AI trade journal, deployment monitoring.
+- Production hardening: exchange lifecycle reconciliation, failed-unprotected recovery, exchange-fill ledger, Alembic migrations, and account/equity reconciliation.
 
 Still recommended:
 
-- Production exchange fill reconciliation.
 - Mainnet dry-run checklist and small-notional test protocol.
 - VPS TLS/reverse-proxy automation.
 - Backup and restore automation.

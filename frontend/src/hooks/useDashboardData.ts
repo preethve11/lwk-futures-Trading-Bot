@@ -12,7 +12,8 @@ const emptySnapshot: DashboardSnapshot = {
   sessions: [],
   positions: [],
   riskState: null,
-  riskEvents: []
+  riskEvents: [],
+  accountSnapshots: []
 };
 
 export function useDashboardData() {
@@ -65,6 +66,10 @@ export function useDashboardData() {
   const derived = useMemo(() => {
     const realizedPnl = snapshot.trades.reduce((total, trade) => total + trade.pnl, 0);
     const latestSession = snapshot.sessions[0] ?? null;
+    const latestAccountSnapshot = snapshot.accountSnapshots[0] ?? null;
+    const accountEquityCurve = [...snapshot.accountSnapshots]
+      .sort((left, right) => Date.parse(left.event_time) - Date.parse(right.event_time))
+      .map((item) => item.margin_balance);
     const currentPosition = snapshot.positions.find((position) => position.status === 'open') ?? null;
     const openRiskItems =
       Number(snapshot.riskState?.kill_switch_enabled ?? false) +
@@ -73,7 +78,7 @@ export function useDashboardData() {
       Number(snapshot.riskState?.drawdown_locked ?? false) +
       snapshot.riskEvents.filter((event) => ['CRITICAL', 'EMERGENCY'].includes(event.severity)).length;
 
-    return { realizedPnl, latestSession, currentPosition, openRiskItems };
+    return { realizedPnl, latestSession, latestAccountSnapshot, accountEquityCurve, currentPosition, openRiskItems };
   }, [snapshot]);
 
   return {

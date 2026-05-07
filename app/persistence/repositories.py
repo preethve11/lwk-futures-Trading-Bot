@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.persistence.models import (
     AIReportModel,
+    AccountSnapshotModel,
     BacktestRunModel,
     BotSessionModel,
     ConfigModel,
@@ -27,7 +28,7 @@ from app.persistence.models import (
 from app.exchange.fills import ExchangeFill
 from trading_bot.analytics.metrics import PerformanceMetrics
 from trading_bot.core.types import Position, Signal, Trade
-from trading_bot.execution.base import ExchangeOrderStatus, OrderResult, ProtectedOrderResult
+from trading_bot.execution.base import AccountSnapshot, ExchangeOrderStatus, OrderResult, ProtectedOrderResult
 
 
 @dataclass(frozen=True)
@@ -530,6 +531,50 @@ class ExchangeFillRepository:
             realized_pnl=sum(fill.realized_pnl for fill in fills),
             commission=sum(fill.commission for fill in fills),
         )
+
+
+class AccountSnapshotRepository:
+    """Persistence operations for live account wallet/equity snapshots."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create_from_snapshot(
+        self,
+        snapshot: AccountSnapshot,
+        *,
+        bot_session_id: int | None = None,
+    ) -> AccountSnapshotModel:
+        model = AccountSnapshotModel(
+            bot_session_id=bot_session_id,
+            asset=snapshot.asset.upper(),
+            wallet_balance=snapshot.wallet_balance,
+            unrealized_pnl=snapshot.unrealized_pnl,
+            margin_balance=snapshot.margin_balance,
+            available_balance=snapshot.available_balance,
+            max_withdraw_amount=snapshot.max_withdraw_amount,
+            event_time=snapshot.event_time or utc_now(),
+            raw_response=snapshot.raw_response,
+        )
+        self.session.add(model)
+        self.session.flush()
+        return model
+
+    def latest(self, *, asset: str = "USDT") -> AccountSnapshotModel | None:
+        statement = (
+            select(AccountSnapshotModel)
+            .where(AccountSnapshotModel.asset == asset.upper())
+            .order_by(AccountSnapshotModel.event_time.desc(), AccountSnapshotModel.id.desc())
+            .limit(1)
+        )
+        return self.session.scalar(statement)
+
+    def list_recent(self, *, asset: str | None = None, limit: int = 100) -> list[AccountSnapshotModel]:
+        statement = select(AccountSnapshotModel)
+        if asset is not None:
+            statement = statement.where(AccountSnapshotModel.asset == asset.upper())
+        statement = statement.order_by(AccountSnapshotModel.event_time.desc(), AccountSnapshotModel.id.desc()).limit(limit)
+        return list(self.session.scalars(statement))
 
 
 class AIReportRepository:

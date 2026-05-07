@@ -1,5 +1,6 @@
 import type {
   BacktestRun,
+  AccountSnapshot,
   AIReport,
   BotSession,
   ConfigSnapshot,
@@ -43,6 +44,7 @@ export const apiClient = {
   getPositions: () => request<Position[]>('/positions'),
   getRiskState: () => request<RiskState>('/risk/state'),
   getRiskEvents: () => request<RiskEvent[]>('/risk/events'),
+  getAccountSnapshots: () => request<AccountSnapshot[]>('/account/snapshots?limit=250'),
   runMultiBacktest: (payload: MultiBacktestRunRequest) =>
     request<MultiBacktestRunResult>('/backtests/run-multi', {
       method: 'POST',
@@ -61,7 +63,18 @@ export const apiClient = {
 };
 
 export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
-  const [configs, backtests, trades, signals, aiReports, sessions, positions, riskState, riskEvents] = await Promise.all([
+  const [
+    configs,
+    backtests,
+    trades,
+    signals,
+    aiReports,
+    sessions,
+    positions,
+    riskState,
+    riskEvents,
+    accountSnapshots
+  ] = await Promise.all([
     apiClient.getConfigs(),
     apiClient.getBacktests(),
     apiClient.getTrades(),
@@ -70,10 +83,11 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
     apiClient.getSessions(),
     apiClient.getPositions(),
     apiClient.getRiskState(),
-    apiClient.getRiskEvents()
+    apiClient.getRiskEvents(),
+    apiClient.getAccountSnapshots()
   ]);
 
-  return { configs, backtests, trades, signals, aiReports, sessions, positions, riskState, riskEvents };
+  return { configs, backtests, trades, signals, aiReports, sessions, positions, riskState, riskEvents, accountSnapshots };
 }
 
 export function connectLiveEvents(onEvent: (event: LiveEvent) => void, onError: () => void): WebSocket | null {

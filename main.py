@@ -8,6 +8,7 @@ Usage:
   python main.py monte-carlo [--config config.yaml]
   python main.py db-upgrade [--config config.yaml]
   python main.py db-current [--config config.yaml]
+  python main.py reconcile-account [--config config.yaml]
   python main.py reconcile-lifecycle [--config config.yaml]
   python main.py recover-unprotected [--config config.yaml]
   python main.py live [--config config.yaml]
@@ -39,6 +40,7 @@ from app.market_data.binance_ws import BinanceKlineStreamService
 from app.market_data.redis_store import RedisKlineStore
 from app.persistence.database import create_session_factory, init_db, session_scope
 from app.persistence.repositories import TradeRepository
+from app.workers.account_equity import AccountEquityReconciliationWorker
 from app.workers.exchange_lifecycle import ExchangeLifecycleReconciliationWorker
 from app.strategies.registry import create_default_strategy_registry
 from app.workers.failed_unprotected_recovery import FailedUnprotectedRecoveryWorker
@@ -506,6 +508,53 @@ def run_reconcile_lifecycle(config_path: Path | None, limit: int) -> int:
         alert_queue.stop(drain=True)
 
 
+def run_reconcile_account(config_path: Path | None, asset: str) -> int:
+    """Run one live account wallet/equity reconciliation sweep."""
+    settings = load_config(config_path, ROOT)
+    setup_logging(settings.log_level, settings.log_dir, settings.log_file)
+    logger = logging.getLogger("trading_bot.account_equity")
+    if not settings.active_binance_api_key or not settings.active_binance_api_secret:
+        logger.error("Account reconciliation needs active Binance API keys")
+        return 1
+
+    session_factory = create_session_factory(settings.database_url)
+    try:
+        init_db(session_factory)
+    except Exception as exc:
+        logger.exception("Could not initialize persistence database", extra={"error": str(exc)})
+
+    alert_queue = AlertQueue(
+        bot_token=settings.telegram_bot_token,
+        chat_id=settings.telegram_chat_id,
+    )
+    try:
+        worker = AccountEquityReconciliationWorker(
+            session_factory=session_factory,
+            client=BinanceFuturesClient(
+                settings.active_binance_api_key,
+                settings.active_binance_api_secret,
+                testnet=settings.use_testnet,
+            ),
+            alert_queue=alert_queue,
+            drift_threshold_usd=settings.account_equity_drift_threshold_usd,
+            drift_threshold_pct=settings.account_equity_drift_threshold_pct,
+        )
+        summary = worker.reconcile_once(asset=asset)
+        print("\n--- Account Equity Reconciliation ---")
+        print(f"Asset: {summary.asset}")
+        print(f"Snapshot ID: {summary.snapshot_id}")
+        print(f"Previous equity: {summary.previous_equity}")
+        print(f"Current equity: {summary.current_equity}")
+        print(f"Equity delta: {summary.equity_delta}")
+        print(f"Equity delta pct: {summary.equity_delta_pct}")
+        print(f"Wallet delta: {summary.wallet_delta}")
+        print(f"Drift detected: {summary.drift_detected}")
+        print(f"Errors: {len(summary.errors)}")
+        return 1 if summary.errors else 0
+    finally:
+        alert_queue.stop(drain=True)
+
+
 def _alembic_config(database_url: str):
     from alembic.config import Config as AlembicConfig
 
@@ -546,6 +595,7 @@ def main() -> int:
             "monte-carlo",
             "db-upgrade",
             "db-current",
+            "reconcile-account",
             "reconcile-lifecycle",
             "recover-unprotected",
             "live",
@@ -554,7 +604,7 @@ def main() -> int:
         ],
         help=(
             "Run backtest, backtest-multi, walk-forward, monte-carlo, db-upgrade, db-current, "
-            "reconcile-lifecycle, recover-unprotected, live, api, or market-data"
+            "reconcile-account, reconcile-lifecycle, recover-unprotected, live, api, or market-data"
         ),
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to config.yaml")
@@ -569,6 +619,7 @@ def main() -> int:
     parser.add_argument("--ruin-drawdown-pct", type=float, default=None, help="Monte Carlo ruin threshold as drawdown percent")
     parser.add_argument("--revision", default="head", help="Alembic revision for db-upgrade")
     parser.add_argument("--limit", type=int, default=100, help="Maximum failed-unprotected orders to recover")
+    parser.add_argument("--asset", default="USDT", help="Account asset for account reconciliation")
     args = parser.parse_args()
     if args.mode == "backtest":
         return run_backtest(args.config)
@@ -589,6 +640,8 @@ def main() -> int:
         return run_db_upgrade(args.config, args.revision)
     if args.mode == "db-current":
         return run_db_current(args.config)
+    if args.mode == "reconcile-account":
+        return run_reconcile_account(args.config, args.asset)
     if args.mode == "reconcile-lifecycle":
         return run_reconcile_lifecycle(args.config, args.limit)
     if args.mode == "recover-unprotected":

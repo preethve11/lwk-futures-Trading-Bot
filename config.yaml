@@ -94,3 +94,6 @@ monitoring:
   metrics_include_database: true
   metrics_token: ""
   readiness_check_database: true
+  account_reconciliation_interval_seconds: 300
+  account_equity_drift_threshold_usd: 25.0
+  account_equity_drift_threshold_pct: 5.0

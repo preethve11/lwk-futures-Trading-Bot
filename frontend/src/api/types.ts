@@ -168,6 +168,20 @@ export interface AIReport {
   created_at: string;
 }
 
+export interface AccountSnapshot {
+  id: number;
+  bot_session_id: number | null;
+  asset: string;
+  wallet_balance: number;
+  unrealized_pnl: number;
+  margin_balance: number;
+  available_balance: number;
+  max_withdraw_amount: number | null;
+  event_time: string;
+  raw_response: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface LiveEvent {
   event_type: string;
   payload: Record<string, unknown>;
@@ -183,6 +197,7 @@ export interface DashboardSnapshot {
   riskState: RiskState | null;
   riskEvents: RiskEvent[];
   aiReports: AIReport[];
+  accountSnapshots: AccountSnapshot[];
 }
 
 export interface RiskStateUpdate {

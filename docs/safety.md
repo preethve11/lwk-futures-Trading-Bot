@@ -38,6 +38,12 @@ The bot supports:
 
 The kill switch blocks new trading decisions. It does not replace checking the exchange directly for already-open positions.
 
+## Account Equity Reconciliation
+
+The account reconciler periodically records Binance futures wallet state and compares each snapshot with the previous one. Drift alerts are meant to catch unexpected balance movement caused by fees, funding, manual trades, deposits, withdrawals, stale local state, or exchange/account issues.
+
+Balance drift does not automatically place, cancel, pause, or close anything. Operators should treat an unexplained `account_balance_drift` event as a reason to enable the kill switch, inspect Binance directly, and run lifecycle/fill reconciliation before restarting live trading.
+
 ## Order Protection
 
 After a market entry, the reconciliation worker checks for stop-loss and take-profit protection. If protection cannot be verified, the system can:
@@ -65,9 +71,10 @@ The AI trade journal is advisory-only:
 1. Trigger the kill switch from the dashboard or `POST /risk/kill-switch`.
 2. Check Binance for open positions and open reduce-only orders.
 3. Review latest `risk_events`, orders requiring manual review, and Telegram alerts.
-4. Export relevant logs and database rows before restart.
-5. Close or protect positions manually if needed.
-6. Restart services only after the exchange state is understood.
+4. Check latest `account_snapshots` and compare wallet/equity against Binance.
+5. Export relevant logs and database rows before restart.
+6. Close or protect positions manually if needed.
+7. Restart services only after the exchange state is understood.
 
 ## Production Readiness Criteria
 
