@@ -307,6 +307,211 @@ class BacktestRunModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
+class MarketDataModel(Base):
+    """Normalized OHLCV candle persisted for research and replay."""
+
+    __tablename__ = "market_data"
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", "open_time", name="uq_market_data_symbol_timeframe_open_time"),
+        Index("ix_market_data_symbol_timeframe_open_time", "symbol", "timeframe", "open_time"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True)
+    open_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    close_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    open: Mapped[float]
+    high: Mapped[float]
+    low: Mapped[float]
+    close: Mapped[float]
+    volume: Mapped[float]
+    quote_volume: Mapped[float] = mapped_column(default=0.0)
+    trades_count: Mapped[int | None] = mapped_column(nullable=True)
+    source: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
+    is_closed: Mapped[bool] = mapped_column(default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class FeatureModel(Base):
+    """Feature snapshot for one candle, keyed by symbol/timeframe/time/version."""
+
+    __tablename__ = "features"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "timeframe",
+            "event_time",
+            "feature_set_version",
+            name="uq_features_symbol_timeframe_event_time_version",
+        ),
+        Index("ix_features_symbol_timeframe_event_time", "symbol", "timeframe", "event_time"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    feature_set_version: Mapped[str] = mapped_column(String(64), default="v1", index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class RegimeModel(Base):
+    """Market regime label attached to one candle."""
+
+    __tablename__ = "regimes"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "timeframe",
+            "event_time",
+            "detector_version",
+            name="uq_regimes_symbol_timeframe_event_time_version",
+        ),
+        Index("ix_regimes_symbol_timeframe_event_time", "symbol", "timeframe", "event_time"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    detector_version: Mapped[str] = mapped_column(String(64), default="v1", index=True)
+    trend_state: Mapped[str] = mapped_column(String(32), index=True)
+    volatility_state: Mapped[str] = mapped_column(String(32), index=True)
+    liquidity_state: Mapped[str] = mapped_column(String(32), index=True)
+    regime_id: Mapped[str] = mapped_column(String(120), index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class StrategyModel(Base):
+    """Registered strategy candidate and parameter snapshot."""
+
+    __tablename__ = "strategies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    family: Mapped[str] = mapped_column(String(80), default="", index=True)
+    version: Mapped[str] = mapped_column(String(64), default="v1")
+    status: Mapped[str] = mapped_column(String(32), default="candidate", index=True)
+    parameters: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    allowed_regimes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class BacktestResultModel(Base):
+    """Detailed validation result for a strategy candidate."""
+
+    __tablename__ = "backtest_results"
+    __table_args__ = (Index("ix_backtest_results_strategy_symbol_timeframe", "strategy_id", "symbol", "timeframe"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    strategy_id: Mapped[str] = mapped_column(String(160), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True)
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metrics: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    regime_metrics: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    fee_bps: Mapped[float] = mapped_column(default=0.0)
+    slippage_bps: Mapped[float] = mapped_column(default=0.0)
+    passed_validation: Mapped[bool] = mapped_column(default=False, index=True)
+    rejection_reason: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class ExecutionModel(Base):
+    """Expected-vs-actual execution quality record."""
+
+    __tablename__ = "executions"
+    __table_args__ = (
+        UniqueConstraint("exchange_execution_id", name="uq_executions_exchange_execution_id"),
+        Index("ix_executions_symbol_event_time", "symbol", "event_time"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
+    exchange_execution_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    strategy_id: Mapped[str] = mapped_column(String(160), default="", index=True)
+    mode: Mapped[str] = mapped_column(String(24), default="paper", index=True)
+    side: Mapped[str] = mapped_column(String(12), index=True)
+    order_type: Mapped[str] = mapped_column(String(32), default="MARKET")
+    expected_price: Mapped[float | None] = mapped_column(nullable=True)
+    actual_price: Mapped[float | None] = mapped_column(nullable=True)
+    quantity: Mapped[float]
+    fee: Mapped[float] = mapped_column(default=0.0)
+    fee_asset: Mapped[str] = mapped_column(String(24), default="")
+    slippage_bps: Mapped[float | None] = mapped_column(nullable=True)
+    latency_ms: Mapped[float | None] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="submitted", index=True)
+    raw_payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class PortfolioAllocationModel(Base):
+    """Capital allocation decision for a strategy candidate."""
+
+    __tablename__ = "portfolio_allocations"
+    __table_args__ = (Index("ix_portfolio_allocations_strategy_created_at", "strategy_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(160), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), default="", index=True)
+    allocated_capital: Mapped[float]
+    weight: Mapped[float]
+    max_weight: Mapped[float] = mapped_column(default=0.30)
+    regime_id: Mapped[str] = mapped_column(String(120), default="", index=True)
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    active: Mapped[bool] = mapped_column(default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class PerformanceHealthModel(Base):
+    """Live/paper strategy health snapshot for kill/reduce decisions."""
+
+    __tablename__ = "performance_health"
+    __table_args__ = (Index("ix_performance_health_strategy_checked_at", "strategy_id", "checked_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[str] = mapped_column(String(160), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), default="", index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), default="", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="HEALTHY", index=True)
+    expectancy: Mapped[float] = mapped_column(default=0.0)
+    profit_factor: Mapped[float] = mapped_column(default=0.0)
+    sharpe_ratio: Mapped[float] = mapped_column(default=0.0)
+    max_drawdown_pct: Mapped[float] = mapped_column(default=0.0)
+    win_rate: Mapped[float] = mapped_column(default=0.0)
+    trade_count: Mapped[int] = mapped_column(default=0)
+    slippage_bps: Mapped[float] = mapped_column(default=0.0)
+    degradation_pct: Mapped[float] = mapped_column(default=0.0)
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class SystemLogModel(Base):
+    """Structured operational log persisted for dashboard/audit use."""
+
+    __tablename__ = "system_logs"
+    __table_args__ = (Index("ix_system_logs_level_created_at", "level", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    level: Mapped[str] = mapped_column(String(24), index=True)
+    logger: Mapped[str] = mapped_column(String(160), default="", index=True)
+    event_type: Mapped[str] = mapped_column(String(80), default="", index=True)
+    message: Mapped[str] = mapped_column(String(1000), default="")
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
 class AIReportModel(Base):
     """Advisory-only AI journal report for signal and trade decisions."""
 

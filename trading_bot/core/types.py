@@ -82,3 +82,14 @@ class Trade:
     intended_tp_pct: float = 0.0
     session_name: str = ""
     session_open_time_utc: str = ""
+    funding_rate: float = 0.0
+    funding_rate_delta_8h: float = 0.0
+    open_interest_change_pct: float = 0.0
+    adl_quantile: float = 0.0
+    liquidation_spike_ratio: float = 0.0
+    spread_proxy_bps: float = 0.0
+    expected_edge_bps: float = 0.0
+    expected_cost_bps: float = 0.0
+    day_of_week: int = -1
+    hour_of_day: int = -1
+    strategy_id: str = ""

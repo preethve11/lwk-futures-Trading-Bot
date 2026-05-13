@@ -69,6 +69,7 @@ class WalkForwardWindow:
     validation_start: datetime
     validation_end: datetime
     train_rows: int
+    embargo_rows: int
     validation_rows: int
 
     def to_dict(self) -> dict[str, object]:
@@ -79,6 +80,7 @@ class WalkForwardWindow:
             "validation_start": self.validation_start.isoformat(),
             "validation_end": self.validation_end.isoformat(),
             "train_rows": self.train_rows,
+            "embargo_rows": self.embargo_rows,
             "validation_rows": self.validation_rows,
         }
 
@@ -165,6 +167,7 @@ class WalkForwardOptimizer:
         train_size: int,
         validation_size: int,
         step_size: int,
+        embargo_size: int = 0,
         n_trials: int,
         objective: ObjectiveName = "sharpe",
         random_seed: int = 42,
@@ -175,12 +178,15 @@ class WalkForwardOptimizer:
             raise ValueError("validation_size must be greater than zero")
         if step_size <= 0:
             raise ValueError("step_size must be greater than zero")
+        if embargo_size < 0:
+            raise ValueError("embargo_size cannot be negative")
         if n_trials <= 0:
             raise ValueError("n_trials must be greater than zero")
         self.settings = settings
         self.train_size = train_size
         self.validation_size = validation_size
         self.step_size = step_size
+        self.embargo_size = embargo_size
         self.n_trials = n_trials
         self.objective = objective
         self.random_seed = random_seed
@@ -196,7 +202,7 @@ class WalkForwardOptimizer:
         normalized = _normalize_candles(candles)
         splits = self._build_splits(normalized)
         if not splits:
-            required = self.train_size + self.validation_size
+            required = self.train_size + self.embargo_size + self.validation_size
             raise ValueError(f"Walk-forward optimization requires at least {required} candles")
 
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -205,8 +211,8 @@ class WalkForwardOptimizer:
         window_results: list[WalkForwardWindowResult] = []
         validation_trades: list[Trade] = []
 
-        for index, train, validation in splits:
-            window = _window_from_split(index, train, validation)
+        for index, train, validation, embargo_rows in splits:
+            window = _window_from_split(index, train, validation, embargo_rows=embargo_rows)
             params, train_score = self._optimize_train_window(train, resolved_symbol)
             validation_result = self._run_backtest(validation, params, resolved_symbol)
             validation_metrics = _require_metrics(validation_result)
@@ -237,18 +243,20 @@ class WalkForwardOptimizer:
             windows=window_results,
         )
 
-    def _build_splits(self, candles: pd.DataFrame) -> list[tuple[int, pd.DataFrame, pd.DataFrame]]:
-        splits: list[tuple[int, pd.DataFrame, pd.DataFrame]] = []
+    def _build_splits(self, candles: pd.DataFrame) -> list[tuple[int, pd.DataFrame, pd.DataFrame, int]]:
+        splits: list[tuple[int, pd.DataFrame, pd.DataFrame, int]] = []
         start = 0
         index = 1
-        while start + self.train_size + self.validation_size <= len(candles):
+        while start + self.train_size + self.embargo_size + self.validation_size <= len(candles):
             train_end = start + self.train_size
-            validation_end = train_end + self.validation_size
+            validation_start = train_end + self.embargo_size
+            validation_end = validation_start + self.validation_size
             splits.append(
                 (
                     index,
                     candles.iloc[start:train_end].reset_index(drop=True),
-                    candles.iloc[train_end:validation_end].reset_index(drop=True),
+                    candles.iloc[validation_start:validation_end].reset_index(drop=True),
+                    self.embargo_size,
                 )
             )
             start += self.step_size
@@ -372,7 +380,13 @@ def _normalize_candles(candles: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
-def _window_from_split(index: int, train: pd.DataFrame, validation: pd.DataFrame) -> WalkForwardWindow:
+def _window_from_split(
+    index: int,
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    *,
+    embargo_rows: int,
+) -> WalkForwardWindow:
     return WalkForwardWindow(
         index=index,
         train_start=_to_datetime(train.iloc[0]["time"]),
@@ -380,6 +394,7 @@ def _window_from_split(index: int, train: pd.DataFrame, validation: pd.DataFrame
         validation_start=_to_datetime(validation.iloc[0]["time"]),
         validation_end=_to_datetime(validation.iloc[-1]["time"]),
         train_rows=len(train),
+        embargo_rows=embargo_rows,
         validation_rows=len(validation),
     )
 

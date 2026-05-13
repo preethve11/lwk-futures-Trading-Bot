@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from app.core.config import Settings
 from trading_bot.strategies.base import BaseStrategy
+from trading_bot.strategies.adaptive_momentum_breakout import AdaptiveMomentumBreakoutStrategy
 from trading_bot.strategies.ema_rsi_vwap import EmaRsiVwapStrategy
 from trading_bot.strategies.ema_rsi_vwap_combined import EmaRsiVwapCombinedStrategy
 from trading_bot.strategies.ema_rsi_vwap_high_vol import EmaRsiVwapHighVolStrategy
@@ -51,6 +52,7 @@ def create_default_strategy_registry() -> StrategyRegistry:
     registry.register("ema_rsi_vwap_high_vol", _create_ema_rsi_vwap_high_vol)
     registry.register("ema_rsi_vwap_combined", _create_ema_rsi_vwap_combined)
     registry.register("session_breakout", _create_session_breakout)
+    registry.register("adaptive_momentum_breakout", _create_adaptive_momentum_breakout)
     return registry
 
 
@@ -134,4 +136,39 @@ def _create_session_breakout(settings: Settings) -> SessionBreakoutStrategy:
         min_adx=settings.session_breakout_min_adx,
         entry_buffer_pct=settings.session_breakout_entry_buffer_pct,
         enabled_timeframes=settings.session_breakout_enabled_timeframes,
+    )
+
+
+def _create_adaptive_momentum_breakout(settings: Settings) -> AdaptiveMomentumBreakoutStrategy:
+    return AdaptiveMomentumBreakoutStrategy(
+        symbol=settings.symbol,
+        timeframe=settings.timeframe,
+        enabled_timeframes=settings.adaptive_momentum_enabled_timeframes,
+        donchian_window=settings.adaptive_momentum_donchian_window,
+        ema_fast=settings.adaptive_momentum_ema_fast,
+        ema_slow=settings.adaptive_momentum_ema_slow,
+        adx_length=settings.adaptive_momentum_adx_length,
+        long_adx_min=settings.adaptive_momentum_long_adx_min,
+        short_adx_min=settings.adaptive_momentum_short_adx_min,
+        volume_ratio_min=settings.adaptive_momentum_volume_ratio_min,
+        atr_length=settings.adaptive_momentum_atr_length,
+        stop_atr_mult=settings.adaptive_momentum_stop_atr_mult,
+        take_profit_r_multiple=settings.adaptive_momentum_take_profit_r_multiple,
+        trailing_stop_atr_mult=settings.adaptive_momentum_trailing_stop_atr_mult,
+        max_holding_bars=settings.adaptive_momentum_max_holding_bars,
+        spread_max_bps=settings.adaptive_momentum_spread_max_bps,
+        funding_rate_abs_long_max=settings.adaptive_momentum_funding_rate_abs_long_max,
+        funding_rate_abs_short_max=settings.adaptive_momentum_funding_rate_abs_short_max,
+        funding_rate_delta_max=settings.adaptive_momentum_funding_rate_delta_max,
+        open_interest_spike_pct_max=settings.adaptive_momentum_open_interest_spike_pct_max,
+        adl_quantile_max=settings.adaptive_momentum_adl_quantile_max,
+        liquidation_spike_ratio_max=settings.adaptive_momentum_liquidation_spike_ratio_max,
+        volatility_shock_percentile_min=settings.adaptive_momentum_volatility_shock_percentile_min,
+        allowed_days_of_week=settings.adaptive_momentum_allowed_days_of_week,
+        blocked_hours_utc=settings.adaptive_momentum_blocked_hours_utc,
+        fee_bps=settings.fee_bps,
+        slippage_bps=settings.slippage_bps,
+        max_expected_cost_share=settings.adaptive_momentum_max_expected_cost_share,
+        short_position_size_multiplier=settings.adaptive_momentum_short_position_size_multiplier,
+        cooldown_candles=settings.cooldown_candles,
     )

@@ -84,6 +84,22 @@ class OpenBacktestPosition:
     intended_tp_pct: float = 0.0
     session_name: str = ""
     session_open_time_utc: str = ""
+    trailing_stop_atr_mult: float = 0.0
+    max_holding_bars: int = 0
+    exit_on_ema50_cross: bool = False
+    exit_on_ranging_regime: bool = False
+    best_price: float = 0.0
+    funding_rate: float = 0.0
+    funding_rate_delta_8h: float = 0.0
+    open_interest_change_pct: float = 0.0
+    adl_quantile: float = 0.0
+    liquidation_spike_ratio: float = 0.0
+    spread_proxy_bps: float = 0.0
+    expected_edge_bps: float = 0.0
+    expected_cost_bps: float = 0.0
+    day_of_week: int = -1
+    hour_of_day: int = -1
+    strategy_id: str = ""
 
 
 BacktestRecorder = Callable[[BacktestResult, str, str | datetime | None, str | datetime | None], None]
@@ -185,6 +201,7 @@ class BacktestEngine:
                 side = open_pos.side
                 entry_price = open_pos.entry_price
                 qty = open_pos.quantity
+                _update_trailing_stop(open_pos, bar, high=high, low=low)
                 stop = open_pos.stop_price
                 tp = open_pos.take_profit_price
                 entry_time = open_pos.entry_time
@@ -204,6 +221,8 @@ class BacktestEngine:
                     elif low <= tp:
                         exit_price = tp
                         exit_reason = "take_profit"
+                if exit_price is None:
+                    exit_price, exit_reason = _strategy_exit(open_pos, bar, i)
                 if exit_price is not None:
                     exit_price_adj = exit_price / slip_mult if side == SignalSide.LONG else exit_price * slip_mult
                     fee = (qty * entry_price + qty * exit_price_adj) * (self.fee_bps / 10000.0)
@@ -244,6 +263,17 @@ class BacktestEngine:
                             intended_tp_pct=open_pos.intended_tp_pct,
                             session_name=open_pos.session_name,
                             session_open_time_utc=open_pos.session_open_time_utc,
+                            funding_rate=open_pos.funding_rate,
+                            funding_rate_delta_8h=open_pos.funding_rate_delta_8h,
+                            open_interest_change_pct=open_pos.open_interest_change_pct,
+                            adl_quantile=open_pos.adl_quantile,
+                            liquidation_spike_ratio=open_pos.liquidation_spike_ratio,
+                            spread_proxy_bps=open_pos.spread_proxy_bps,
+                            expected_edge_bps=open_pos.expected_edge_bps,
+                            expected_cost_bps=open_pos.expected_cost_bps,
+                            day_of_week=open_pos.day_of_week,
+                            hour_of_day=open_pos.hour_of_day,
+                            strategy_id=open_pos.strategy_id,
                         )
                     )
                     equity_curve.append(capital)
@@ -284,6 +314,12 @@ class BacktestEngine:
                 continue
 
             qty = risk_result.quantity
+            size_multiplier = _metadata_float(raw_signal.metadata, "position_size_multiplier", default=1.0)
+            if size_multiplier <= 0:
+                self.strategy.record_rejection("risk_limit")
+                equity_curve.append(capital)
+                continue
+            qty *= min(size_multiplier, 1.0)
             entry_adj = entry_price * slip_mult if raw_signal.side == SignalSide.LONG else entry_price / slip_mult
             self.strategy.record_executed_signal()
             open_pos = OpenBacktestPosition(
@@ -304,6 +340,22 @@ class BacktestEngine:
                 intended_tp_pct=_metadata_float(raw_signal.metadata, "intended_tp_pct"),
                 session_name=_metadata_str(raw_signal.metadata, "session_name"),
                 session_open_time_utc=_metadata_str(raw_signal.metadata, "session_open_time_utc"),
+                trailing_stop_atr_mult=_metadata_float(raw_signal.metadata, "trailing_stop_atr_mult"),
+                max_holding_bars=_metadata_int(raw_signal.metadata, "max_holding_bars"),
+                exit_on_ema50_cross=_metadata_bool(raw_signal.metadata, "exit_on_ema50_cross"),
+                exit_on_ranging_regime=_metadata_bool(raw_signal.metadata, "exit_on_ranging_regime"),
+                best_price=entry_adj,
+                funding_rate=_metadata_float(raw_signal.metadata, "funding_rate"),
+                funding_rate_delta_8h=_metadata_float(raw_signal.metadata, "funding_rate_delta_8h"),
+                open_interest_change_pct=_metadata_float(raw_signal.metadata, "open_interest_change_pct"),
+                adl_quantile=_metadata_float(raw_signal.metadata, "adl_quantile"),
+                liquidation_spike_ratio=_metadata_float(raw_signal.metadata, "liquidation_spike_ratio"),
+                spread_proxy_bps=_metadata_float(raw_signal.metadata, "spread_proxy_bps"),
+                expected_edge_bps=_metadata_float(raw_signal.metadata, "expected_edge_bps"),
+                expected_cost_bps=_metadata_float(raw_signal.metadata, "expected_cost_bps"),
+                day_of_week=_metadata_int(raw_signal.metadata, "day_of_week", default=-1),
+                hour_of_day=_metadata_int(raw_signal.metadata, "hour_of_day", default=-1),
+                strategy_id=_metadata_str(raw_signal.metadata, "strategy_id"),
             )
             cooldown_bars = getattr(self.strategy, "cooldown_candles", 1) if hasattr(self.strategy, "cooldown_candles") else 1
             equity_curve.append(capital)
@@ -346,6 +398,17 @@ class BacktestEngine:
                     intended_tp_pct=open_pos.intended_tp_pct,
                     session_name=open_pos.session_name,
                     session_open_time_utc=open_pos.session_open_time_utc,
+                    funding_rate=open_pos.funding_rate,
+                    funding_rate_delta_8h=open_pos.funding_rate_delta_8h,
+                    open_interest_change_pct=open_pos.open_interest_change_pct,
+                    adl_quantile=open_pos.adl_quantile,
+                    liquidation_spike_ratio=open_pos.liquidation_spike_ratio,
+                    spread_proxy_bps=open_pos.spread_proxy_bps,
+                    expected_edge_bps=open_pos.expected_edge_bps,
+                    expected_cost_bps=open_pos.expected_cost_bps,
+                    day_of_week=open_pos.day_of_week,
+                    hour_of_day=open_pos.hour_of_day,
+                    strategy_id=open_pos.strategy_id,
                 )
             )
             equity_curve.append(capital)
@@ -405,6 +468,17 @@ class BacktestArtifactExporter:
         "intended_tp_pct",
         "session_name",
         "session_open_time_utc",
+        "funding_rate",
+        "funding_rate_delta_8h",
+        "open_interest_change_pct",
+        "adl_quantile",
+        "liquidation_spike_ratio",
+        "spread_proxy_bps",
+        "expected_edge_bps",
+        "expected_cost_bps",
+        "day_of_week",
+        "hour_of_day",
+        "strategy_id",
     ]
 
     @classmethod
@@ -488,6 +562,17 @@ def _trade_row(trade: Trade, run_name: str, timeframe: str, market_condition: st
         "intended_tp_pct": trade.intended_tp_pct,
         "session_name": trade.session_name,
         "session_open_time_utc": trade.session_open_time_utc,
+        "funding_rate": trade.funding_rate,
+        "funding_rate_delta_8h": trade.funding_rate_delta_8h,
+        "open_interest_change_pct": trade.open_interest_change_pct,
+        "adl_quantile": trade.adl_quantile,
+        "liquidation_spike_ratio": trade.liquidation_spike_ratio,
+        "spread_proxy_bps": trade.spread_proxy_bps,
+        "expected_edge_bps": trade.expected_edge_bps,
+        "expected_cost_bps": trade.expected_cost_bps,
+        "day_of_week": trade.day_of_week,
+        "hour_of_day": trade.hour_of_day,
+        "strategy_id": trade.strategy_id,
     }
 
 
@@ -513,7 +598,7 @@ def _bar_label(row: pd.Series, column: str) -> str:
     return str(value)
 
 
-def _metadata_float(metadata: dict[str, object], key: str) -> float:
+def _metadata_float(metadata: dict[str, object], key: str, *, default: float = 0.0) -> float:
     value = metadata.get(key)
     if isinstance(value, (int, float)):
         return float(value)
@@ -521,8 +606,33 @@ def _metadata_float(metadata: dict[str, object], key: str) -> float:
         try:
             return float(value)
         except ValueError:
-            return 0.0
-    return 0.0
+            return default
+    return default
+
+
+def _metadata_int(metadata: dict[str, object], key: str, *, default: int = 0) -> int:
+    value = metadata.get(key)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return default
+    return default
+
+
+def _metadata_bool(metadata: dict[str, object], key: str) -> bool:
+    value = metadata.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    if isinstance(value, int):
+        return value != 0
+    return False
 
 
 def _metadata_str(metadata: dict[str, object], key: str) -> str:
@@ -559,6 +669,59 @@ def _premature_stop(
     if position.side == SignalSide.LONG:
         return bool(float(future["high"].max()) >= position.take_profit_price)
     return bool(float(future["low"].min()) <= position.take_profit_price)
+
+
+def _update_trailing_stop(open_pos: OpenBacktestPosition, bar: pd.Series, *, high: float, low: float) -> None:
+    """Update an open position's stop when strategy metadata enabled ATR trailing."""
+    if open_pos.trailing_stop_atr_mult <= 0:
+        return
+    atr = _bar_float(bar, "atr_14") or _bar_float(bar, "atr")
+    if atr <= 0:
+        return
+    if open_pos.side == SignalSide.LONG:
+        open_pos.best_price = max(open_pos.best_price, high)
+        open_pos.stop_price = max(open_pos.stop_price, open_pos.best_price - atr * open_pos.trailing_stop_atr_mult)
+    else:
+        open_pos.best_price = min(open_pos.best_price, low)
+        open_pos.stop_price = min(open_pos.stop_price, open_pos.best_price + atr * open_pos.trailing_stop_atr_mult)
+
+
+def _strategy_exit(open_pos: OpenBacktestPosition, bar: pd.Series, index: int) -> tuple[float | None, str]:
+    """Return a strategy-managed exit price/reason when metadata gates request one."""
+    close = _bar_float(bar, "close")
+    if close <= 0:
+        return None, ""
+    if open_pos.max_holding_bars > 0 and index - open_pos.entry_index >= open_pos.max_holding_bars:
+        return close, "max_holding_time"
+    if open_pos.exit_on_ema50_cross:
+        ema_50 = _bar_float(bar, "ema_50")
+        if ema_50 > 0:
+            if open_pos.side == SignalSide.LONG and close < ema_50:
+                return close, "ema50_exit"
+            if open_pos.side == SignalSide.SHORT and close > ema_50:
+                return close, "ema50_exit"
+    if open_pos.exit_on_ranging_regime:
+        trend_regime = _bar_label(bar, "trend_regime")
+        trend_state = _bar_label(bar, "trend_state")
+        if trend_regime == "RANGING" or trend_state == "RANGING":
+            pnl = close - open_pos.entry_price if open_pos.side == SignalSide.LONG else open_pos.entry_price - close
+            if pnl <= 0:
+                return close, "regime_flip"
+    return None, ""
+
+
+def _bar_float(row: pd.Series, column: str) -> float:
+    if column not in row:
+        return 0.0
+    value = row[column]
+    if pd.isna(value):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except ValueError:
+        return 0.0
 
 
 def _to_datetime(value: object) -> datetime:

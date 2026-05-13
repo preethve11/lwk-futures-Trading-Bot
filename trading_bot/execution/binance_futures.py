@@ -233,6 +233,45 @@ class BinanceFuturesClient(ExecutionClient):
             return []
 
     @retry_on_rate_limit(max_retries=2)
+    def fetch_funding_rates(self, symbol: str, limit: int = 100) -> list[dict[str, object]]:
+        """Return Binance USD-M funding-rate history rows for a symbol."""
+        raw = self._client.futures_funding_rate(symbol=symbol, limit=limit)
+        if not isinstance(raw, list):
+            return []
+        return [dict(item) for item in raw if isinstance(item, dict)]
+
+    @retry_on_rate_limit(max_retries=2)
+    def fetch_open_interest(self, symbol: str) -> dict[str, object]:
+        """Return the current Binance USD-M open-interest snapshot."""
+        raw = self._client.futures_open_interest(symbol=symbol)
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    @retry_on_rate_limit(max_retries=2)
+    def fetch_open_interest_history(self, symbol: str, *, period: str = "1h", limit: int = 100) -> list[dict[str, object]]:
+        """Return historical open-interest statistics for crowding detection."""
+        raw = self._client.futures_open_interest_hist(symbol=symbol, period=period, limit=limit)
+        if not isinstance(raw, list):
+            return []
+        return [dict(item) for item in raw if isinstance(item, dict)]
+
+    @retry_on_rate_limit(max_retries=2)
+    def fetch_adl_quantile(self, symbol: str | None = None) -> list[dict[str, object]]:
+        """Return position ADL quantile estimation rows for the account."""
+        kwargs = {"symbol": symbol} if symbol is not None else {}
+        raw = self._client.futures_adl_quantile_estimate(**kwargs)
+        if not isinstance(raw, list):
+            return []
+        return [dict(item) for item in raw if isinstance(item, dict)]
+
+    @retry_on_rate_limit(max_retries=2)
+    def fetch_force_orders(self, symbol: str, limit: int = 100) -> list[dict[str, object]]:
+        """Return user force-order/liquidation records when the account has any."""
+        raw = self._client.futures_liquidation_orders(symbol=symbol, limit=limit)
+        if not isinstance(raw, list):
+            return []
+        return [dict(item) for item in raw if isinstance(item, dict)]
+
+    @retry_on_rate_limit(max_retries=2)
     def get_order_status(self, symbol: str, order_id: str) -> ExchangeOrderStatus | None:
         try:
             raw = self._client.futures_get_order(symbol=symbol, orderId=order_id)

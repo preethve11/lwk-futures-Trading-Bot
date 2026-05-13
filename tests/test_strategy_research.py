@@ -70,6 +70,9 @@ def test_strategy_research_analyzes_trade_distribution(tmp_path: Path) -> None:
     assert report.by_timeframe["5m"]["expectancy"] == -12.5
     assert report.question_analysis["worst_run"]["run"] == "BTCUSDT_5m"
     assert report.question_analysis["why_btcusdt_5m_worse"]["metrics"]["total_trades"] == 2
+    assert report.timing_analysis["best_day_of_week"] is not None
+    assert report.crowding_analysis["crowding_rejections"] == 0
+    assert report.correlated_exposure_analysis["max_symbol_positive_pnl_share"] == 1.0
     assert any(issue.area == "BTCUSDT_5m" for issue in report.issues)
 
 

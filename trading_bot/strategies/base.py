@@ -25,6 +25,18 @@ class BaseStrategy(ABC):
         "outside_session_window",
         "invalid_range",
         "timeframe_disabled",
+        "no_breakout",
+        "regime_blocked",
+        "funding_too_expensive",
+        "funding_delta_spike",
+        "open_interest_spike",
+        "adl_risk",
+        "liquidation_spike",
+        "market_stress",
+        "correlation_risk",
+        "time_filter",
+        "cost_gate",
+        "low_liquidity",
         "other",
     )
 

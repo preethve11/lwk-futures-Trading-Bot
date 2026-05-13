@@ -20,6 +20,7 @@ def test_mainnet_readiness_accepts_small_notional_production_like_config() -> No
     report = evaluate_mainnet_readiness(
         Settings(
             use_testnet=False,
+            enable_live_trading=True,
             confirm_live_trading=True,
             binance_mainnet_api_key="main-key",
             binance_mainnet_api_secret="main-secret",
@@ -46,6 +47,7 @@ def test_mainnet_readiness_flags_oversized_risk_controls() -> None:
     report = evaluate_mainnet_readiness(
         Settings(
             use_testnet=False,
+            enable_live_trading=True,
             confirm_live_trading=True,
             binance_mainnet_api_key="main-key",
             binance_mainnet_api_secret="main-secret",

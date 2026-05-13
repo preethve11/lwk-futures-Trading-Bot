@@ -3,6 +3,7 @@
 
 api:
   use_testnet: true
+  enable_live_trading: false
 
 strategy:
   name: session_breakout
@@ -31,6 +32,34 @@ strategy:
   session_breakout_min_adx: 20.0
   session_breakout_entry_buffer_pct: 0.0
   session_breakout_enabled_timeframes: ["15m", "1h"]
+  adaptive_momentum_breakout:
+    symbols: [BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, LINKUSDT]
+    research_only_symbols: [ZECUSDT]
+    enabled_timeframes: ["15m", "1h"]
+    donchian_window: 20
+    ema_fast: 50
+    ema_slow: 200
+    adx_length: 14
+    long_adx_min: 22.0
+    short_adx_min: 25.0
+    volume_ratio_min: 1.1
+    atr_length: 14
+    stop_atr_mult: 2.5
+    take_profit_r_multiple: 2.0
+    trailing_stop_atr_mult: 3.0
+    max_holding_bars: 120
+    spread_max_bps: 8.0
+    funding_rate_abs_long_max: 0.0003
+    funding_rate_abs_short_max: 0.0003
+    funding_rate_delta_max: 0.0001
+    open_interest_spike_pct_max: 12.0
+    adl_quantile_max: 3.0
+    liquidation_spike_ratio_max: 3.0
+    volatility_shock_percentile_min: 0.9
+    allowed_days_of_week: [0, 1, 2, 3, 4, 5, 6]
+    blocked_hours_utc: []
+    max_expected_cost_share: 0.35
+    short_position_size_multiplier: 0.5
 
 risk:
   risk_per_trade_usd: 10.0
@@ -74,6 +103,7 @@ optimization:
     train_size: 500
     validation_size: 100
     step_size: 100
+    embargo_size: 480
     trials: 30
     objective: sharpe
     random_seed: 42
@@ -89,6 +119,8 @@ market_data:
   # rest = live strategy loop polls Binance REST.
   # redis = live strategy loop consumes klines published by `python main.py market-data`.
   source: rest
+  symbols: [BTCUSDT, ETHUSDT, SOLUSDT]
+  timeframes: [5m, 15m, 1h]
   channel: market_data.kline
   history_size: 500
   reconnect_backoff_seconds: 2.0
@@ -109,9 +141,9 @@ monitoring:
   account_equity_drift_threshold_pct: 5.0
   live_strategy_gate_enabled: false
   live_strategy_gate_required_for_mainnet: true
-  live_gate_min_trades: 20
-  live_gate_min_profit_factor: 1.1
+  live_gate_min_trades: 100
+  live_gate_min_profit_factor: 1.25
   live_gate_min_expectancy_usd: 0.0
   live_gate_min_sharpe: 0.0
-  live_gate_max_drawdown_pct: 20.0
+  live_gate_max_drawdown_pct: 15.0
   live_gate_max_backtest_age_days: 30

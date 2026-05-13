@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "staging", "production"] = "local"
     use_testnet: bool = True
+    enable_live_trading: bool = False
     confirm_live_trading: bool = False
 
     binance_api_key: str = ""
@@ -66,6 +67,35 @@ class Settings(BaseSettings):
     session_breakout_min_adx: float = Field(default=20.0, ge=0)
     session_breakout_entry_buffer_pct: float = Field(default=0.0, ge=0)
     session_breakout_enabled_timeframes: list[str] = Field(default_factory=lambda: ["15m", "1h"])
+    adaptive_momentum_symbols: list[str] = Field(
+        default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "LINKUSDT"]
+    )
+    adaptive_momentum_research_only_symbols: list[str] = Field(default_factory=lambda: ["ZECUSDT"])
+    adaptive_momentum_enabled_timeframes: list[str] = Field(default_factory=lambda: ["15m", "1h"])
+    adaptive_momentum_donchian_window: int = Field(default=20, gt=0)
+    adaptive_momentum_ema_fast: int = Field(default=50, gt=0)
+    adaptive_momentum_ema_slow: int = Field(default=200, gt=0)
+    adaptive_momentum_adx_length: int = Field(default=14, gt=0)
+    adaptive_momentum_long_adx_min: float = Field(default=22.0, ge=0)
+    adaptive_momentum_short_adx_min: float = Field(default=25.0, ge=0)
+    adaptive_momentum_volume_ratio_min: float = Field(default=1.1, ge=0)
+    adaptive_momentum_atr_length: int = Field(default=14, gt=0)
+    adaptive_momentum_stop_atr_mult: float = Field(default=2.5, gt=0)
+    adaptive_momentum_take_profit_r_multiple: float = Field(default=2.0, gt=0)
+    adaptive_momentum_trailing_stop_atr_mult: float = Field(default=3.0, ge=0)
+    adaptive_momentum_max_holding_bars: int = Field(default=120, gt=0)
+    adaptive_momentum_spread_max_bps: float = Field(default=8.0, gt=0)
+    adaptive_momentum_funding_rate_abs_long_max: float = Field(default=0.0003, ge=0)
+    adaptive_momentum_funding_rate_abs_short_max: float = Field(default=0.0003, ge=0)
+    adaptive_momentum_funding_rate_delta_max: float = Field(default=0.0001, ge=0)
+    adaptive_momentum_open_interest_spike_pct_max: float = Field(default=12.0, ge=0)
+    adaptive_momentum_adl_quantile_max: float = Field(default=3.0, ge=0)
+    adaptive_momentum_liquidation_spike_ratio_max: float = Field(default=3.0, ge=0)
+    adaptive_momentum_volatility_shock_percentile_min: float = Field(default=0.9, ge=0, le=1)
+    adaptive_momentum_allowed_days_of_week: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
+    adaptive_momentum_blocked_hours_utc: list[int] = Field(default_factory=list)
+    adaptive_momentum_max_expected_cost_share: float = Field(default=0.35, gt=0, le=1)
+    adaptive_momentum_short_position_size_multiplier: float = Field(default=0.5, gt=0, le=1)
 
     risk_per_trade_usd: float = Field(default=10.0, gt=0)
     max_daily_loss_usd: float = Field(default=50.0, gt=0)
@@ -96,6 +126,7 @@ class Settings(BaseSettings):
     walk_forward_train_size: int = Field(default=500, gt=0)
     walk_forward_validation_size: int = Field(default=100, gt=0)
     walk_forward_step_size: int = Field(default=100, gt=0)
+    walk_forward_embargo_size: int = Field(default=0, ge=0)
     walk_forward_trials: int = Field(default=30, gt=0)
     walk_forward_objective: Literal["sharpe", "sortino", "total_return", "profit_factor", "win_rate"] = "sharpe"
     walk_forward_random_seed: int = 42
@@ -110,6 +141,8 @@ class Settings(BaseSettings):
     database_auto_create_tables: bool = True
     redis_url: str = "redis://localhost:6379/0"
     market_data_source: Literal["rest", "redis"] = "rest"
+    market_data_symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+    market_data_timeframes: list[str] = Field(default_factory=lambda: ["5m", "15m", "1h"])
     market_data_channel: str = "market_data.kline"
     market_data_history_size: int = Field(default=500, gt=0)
     market_data_reconnect_backoff_seconds: float = Field(default=2.0, gt=0)
@@ -137,11 +170,11 @@ class Settings(BaseSettings):
     account_equity_drift_threshold_pct: float = Field(default=5.0, ge=0)
     live_strategy_gate_enabled: bool = False
     live_strategy_gate_required_for_mainnet: bool = True
-    live_gate_min_trades: int = Field(default=20, ge=0)
-    live_gate_min_profit_factor: float = Field(default=1.1, ge=0)
+    live_gate_min_trades: int = Field(default=100, ge=0)
+    live_gate_min_profit_factor: float = Field(default=1.25, ge=0)
     live_gate_min_expectancy_usd: float = Field(default=0.0)
     live_gate_min_sharpe: float = Field(default=0.0)
-    live_gate_max_drawdown_pct: float = Field(default=20.0, gt=0, le=100)
+    live_gate_max_drawdown_pct: float = Field(default=15.0, gt=0, le=100)
     live_gate_max_backtest_age_days: int = Field(default=30, gt=0)
 
     @field_validator("symbol", mode="before")
@@ -156,12 +189,28 @@ class Settings(BaseSettings):
             return [item.strip().upper() for item in value.split(",") if item.strip()]
         return [item.strip().upper() for item in value]
 
-    @field_validator("session_breakout_sessions", "session_breakout_enabled_timeframes", mode="before")
+    @field_validator(
+        "session_breakout_sessions",
+        "session_breakout_enabled_timeframes",
+        "adaptive_momentum_symbols",
+        "adaptive_momentum_research_only_symbols",
+        "adaptive_momentum_enabled_timeframes",
+        "market_data_symbols",
+        "market_data_timeframes",
+        mode="before",
+    )
     @classmethod
     def normalize_string_list(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return [item.strip() for item in value]
+
+    @field_validator("adaptive_momentum_allowed_days_of_week", "adaptive_momentum_blocked_hours_utc", mode="before")
+    @classmethod
+    def normalize_int_list(cls, value: str | list[int]) -> list[int]:
+        if isinstance(value, str):
+            return [int(item.strip()) for item in value.split(",") if item.strip()]
+        return [int(item) for item in value]
 
     @field_validator("api_cors_origins", mode="before")
     @classmethod
@@ -223,6 +272,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
 
     api = data.get("api", {})
     strategy = data.get("strategy", {})
+    adaptive_momentum = strategy.get("adaptive_momentum_breakout", {})
     risk = data.get("risk", {})
     execution = data.get("execution", {})
     telegram = data.get("telegram", {})
@@ -238,6 +288,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
 
     values: dict[str, Any] = {
         "use_testnet": api.get("use_testnet"),
+        "enable_live_trading": api.get("enable_live_trading"),
         "strategy_name": strategy.get("name") or strategy.get("strategy_name"),
         "symbol": strategy.get("symbol"),
         "symbols": strategy.get("symbols"),
@@ -263,6 +314,33 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "session_breakout_min_adx": strategy.get("session_breakout_min_adx"),
         "session_breakout_entry_buffer_pct": strategy.get("session_breakout_entry_buffer_pct"),
         "session_breakout_enabled_timeframes": strategy.get("session_breakout_enabled_timeframes"),
+        "adaptive_momentum_symbols": adaptive_momentum.get("symbols"),
+        "adaptive_momentum_research_only_symbols": adaptive_momentum.get("research_only_symbols"),
+        "adaptive_momentum_enabled_timeframes": adaptive_momentum.get("enabled_timeframes"),
+        "adaptive_momentum_donchian_window": adaptive_momentum.get("donchian_window"),
+        "adaptive_momentum_ema_fast": adaptive_momentum.get("ema_fast"),
+        "adaptive_momentum_ema_slow": adaptive_momentum.get("ema_slow"),
+        "adaptive_momentum_adx_length": adaptive_momentum.get("adx_length"),
+        "adaptive_momentum_long_adx_min": adaptive_momentum.get("long_adx_min"),
+        "adaptive_momentum_short_adx_min": adaptive_momentum.get("short_adx_min"),
+        "adaptive_momentum_volume_ratio_min": adaptive_momentum.get("volume_ratio_min"),
+        "adaptive_momentum_atr_length": adaptive_momentum.get("atr_length"),
+        "adaptive_momentum_stop_atr_mult": adaptive_momentum.get("stop_atr_mult"),
+        "adaptive_momentum_take_profit_r_multiple": adaptive_momentum.get("take_profit_r_multiple"),
+        "adaptive_momentum_trailing_stop_atr_mult": adaptive_momentum.get("trailing_stop_atr_mult"),
+        "adaptive_momentum_max_holding_bars": adaptive_momentum.get("max_holding_bars"),
+        "adaptive_momentum_spread_max_bps": adaptive_momentum.get("spread_max_bps"),
+        "adaptive_momentum_funding_rate_abs_long_max": adaptive_momentum.get("funding_rate_abs_long_max"),
+        "adaptive_momentum_funding_rate_abs_short_max": adaptive_momentum.get("funding_rate_abs_short_max"),
+        "adaptive_momentum_funding_rate_delta_max": adaptive_momentum.get("funding_rate_delta_max"),
+        "adaptive_momentum_open_interest_spike_pct_max": adaptive_momentum.get("open_interest_spike_pct_max"),
+        "adaptive_momentum_adl_quantile_max": adaptive_momentum.get("adl_quantile_max"),
+        "adaptive_momentum_liquidation_spike_ratio_max": adaptive_momentum.get("liquidation_spike_ratio_max"),
+        "adaptive_momentum_volatility_shock_percentile_min": adaptive_momentum.get("volatility_shock_percentile_min"),
+        "adaptive_momentum_allowed_days_of_week": adaptive_momentum.get("allowed_days_of_week"),
+        "adaptive_momentum_blocked_hours_utc": adaptive_momentum.get("blocked_hours_utc"),
+        "adaptive_momentum_max_expected_cost_share": adaptive_momentum.get("max_expected_cost_share"),
+        "adaptive_momentum_short_position_size_multiplier": adaptive_momentum.get("short_position_size_multiplier"),
         "risk_per_trade_usd": risk.get("risk_per_trade_usd"),
         "max_daily_loss_usd": risk.get("max_daily_loss_usd"),
         "max_drawdown_pct": risk.get("max_drawdown_pct"),
@@ -288,6 +366,7 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "walk_forward_train_size": walk_forward.get("train_size"),
         "walk_forward_validation_size": walk_forward.get("validation_size"),
         "walk_forward_step_size": walk_forward.get("step_size"),
+        "walk_forward_embargo_size": walk_forward.get("embargo_size"),
         "walk_forward_trials": walk_forward.get("trials"),
         "walk_forward_objective": walk_forward.get("objective"),
         "walk_forward_random_seed": walk_forward.get("random_seed"),
@@ -299,6 +378,8 @@ def _load_yaml_values(path: Path) -> dict[str, Any]:
         "monte_carlo_report_dir": monte_carlo.get("report_dir"),
         "database_auto_create_tables": persistence.get("auto_create_tables"),
         "market_data_source": market_data.get("source"),
+        "market_data_symbols": market_data.get("symbols"),
+        "market_data_timeframes": market_data.get("timeframes"),
         "market_data_channel": market_data.get("channel"),
         "market_data_history_size": market_data.get("history_size"),
         "market_data_reconnect_backoff_seconds": market_data.get("reconnect_backoff_seconds"),

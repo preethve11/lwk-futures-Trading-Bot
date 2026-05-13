@@ -48,12 +48,46 @@ class TradeLogRecord:
     intended_tp_pct: float = 0.0
     session_name: str = ""
     session_open_time_utc: str = ""
+    funding_rate: float = 0.0
+    funding_rate_delta_8h: float = 0.0
+    open_interest_change_pct: float = 0.0
+    adl_quantile: float = 0.0
+    liquidation_spike_ratio: float = 0.0
+    spread_proxy_bps: float = 0.0
+    expected_edge_bps: float = 0.0
+    expected_cost_bps: float = 0.0
+    day_of_week: int = -1
+    hour_of_day: int = -1
+    strategy_id: str = ""
 
     @property
     def entry_hour_utc(self) -> str:
         if self.entry_time is None:
             return "unknown"
         return f"{self.entry_time.hour:02d}:00"
+
+    @property
+    def day_name(self) -> str:
+        names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        if 0 <= self.day_of_week <= 6:
+            return names[self.day_of_week]
+        if self.entry_time is not None:
+            return names[self.entry_time.weekday()]
+        return "unknown"
+
+    @property
+    def crowding_bucket(self) -> str:
+        if self.funding_rate_delta_8h > 0.0001 and self.open_interest_change_pct > 12.0:
+            return "funding_and_oi_spike"
+        if self.open_interest_change_pct > 12.0:
+            return "oi_spike"
+        if abs(self.funding_rate_delta_8h) > 0.0001:
+            return "funding_delta_spike"
+        if self.adl_quantile >= 3.0:
+            return "adl_risk"
+        if self.liquidation_spike_ratio >= 3.0:
+            return "liquidation_spike"
+        return "normal"
 
     @property
     def range_width_bucket(self) -> str:
@@ -118,12 +152,16 @@ class StrategyResearchReport:
     by_trend_regime: dict[str, dict[str, Any]]
     by_volatility_regime: dict[str, dict[str, Any]]
     by_volume_regime: dict[str, dict[str, Any]]
+    by_day_of_week: dict[str, dict[str, Any]]
     by_session: dict[str, dict[str, Any]]
     by_range_width_bucket: dict[str, dict[str, Any]]
     by_ema_alignment: dict[str, dict[str, Any]]
     by_adx_bucket: dict[str, dict[str, Any]]
     rejected_signal_analysis: dict[str, Any]
     exit_quality_analysis: dict[str, Any]
+    crowding_analysis: dict[str, Any]
+    timing_analysis: dict[str, Any]
+    correlated_exposure_analysis: dict[str, Any]
     cost_analysis: dict[str, Any]
     outlier_analysis: dict[str, Any]
     question_analysis: dict[str, Any]
@@ -143,12 +181,16 @@ class StrategyResearchReport:
             "by_trend_regime": self.by_trend_regime,
             "by_volatility_regime": self.by_volatility_regime,
             "by_volume_regime": self.by_volume_regime,
+            "by_day_of_week": self.by_day_of_week,
             "by_session": self.by_session,
             "by_range_width_bucket": self.by_range_width_bucket,
             "by_ema_alignment": self.by_ema_alignment,
             "by_adx_bucket": self.by_adx_bucket,
             "rejected_signal_analysis": self.rejected_signal_analysis,
             "exit_quality_analysis": self.exit_quality_analysis,
+            "crowding_analysis": self.crowding_analysis,
+            "timing_analysis": self.timing_analysis,
+            "correlated_exposure_analysis": self.correlated_exposure_analysis,
             "cost_analysis": self.cost_analysis,
             "outlier_analysis": self.outlier_analysis,
             "question_analysis": self.question_analysis,
@@ -187,6 +229,7 @@ def analyze_trade_log(
         _group_metrics(records, lambda record: record.volatility_regime or "unknown") if group_by_regime else {}
     )
     by_volume_regime = _group_metrics(records, lambda record: record.volume_regime or "unknown") if group_by_regime else {}
+    by_day_of_week = _group_metrics(records, lambda record: record.day_name)
     by_session = _group_metrics(records, lambda record: record.session_name or "unknown")
     by_range_width_bucket = _group_metrics(records, lambda record: record.range_width_bucket)
     by_ema_alignment = _group_metrics(records, lambda record: record.ema_alignment_bucket)
@@ -197,6 +240,9 @@ def analyze_trade_log(
         executed_trades=len(records),
     )
     exit_quality_analysis = _exit_quality_analysis(records)
+    crowding_analysis = _crowding_analysis(records, rejected_signal_analysis)
+    timing_analysis = _timing_analysis(by_day_of_week, by_entry_hour_utc)
+    correlated_exposure_analysis = _correlated_exposure_analysis(records)
     outliers = _outlier_analysis(records)
     cost_analysis = _cost_analysis(records, by_timeframe)
     question_analysis = _question_analysis(by_run, by_timeframe, outliers)
@@ -214,12 +260,16 @@ def analyze_trade_log(
         by_trend_regime=by_trend_regime,
         by_volatility_regime=by_volatility_regime,
         by_volume_regime=by_volume_regime,
+        by_day_of_week=by_day_of_week,
         by_session=by_session,
         by_range_width_bucket=by_range_width_bucket,
         by_ema_alignment=by_ema_alignment,
         by_adx_bucket=by_adx_bucket,
         rejected_signal_analysis=rejected_signal_analysis,
         exit_quality_analysis=exit_quality_analysis,
+        crowding_analysis=crowding_analysis,
+        timing_analysis=timing_analysis,
+        correlated_exposure_analysis=correlated_exposure_analysis,
         cost_analysis=cost_analysis,
         outlier_analysis=outliers,
         question_analysis=question_analysis,
@@ -278,6 +328,17 @@ def _record_from_row(row: dict[str, str]) -> TradeLogRecord:
         intended_tp_pct=_float(row.get("intended_tp_pct")),
         session_name=_text(row, "session_name", default="unknown"),
         session_open_time_utc=_text(row, "session_open_time_utc", default=""),
+        funding_rate=_float(row.get("funding_rate")),
+        funding_rate_delta_8h=_float(row.get("funding_rate_delta_8h")),
+        open_interest_change_pct=_float(row.get("open_interest_change_pct")),
+        adl_quantile=_float(row.get("adl_quantile")),
+        liquidation_spike_ratio=_float(row.get("liquidation_spike_ratio")),
+        spread_proxy_bps=_float(row.get("spread_proxy_bps")),
+        expected_edge_bps=_float(row.get("expected_edge_bps")),
+        expected_cost_bps=_float(row.get("expected_cost_bps")),
+        day_of_week=_int(row.get("day_of_week"), default=-1),
+        hour_of_day=_int(row.get("hour_of_day"), default=-1),
+        strategy_id=_text(row, "strategy_id", default=""),
     )
 
 
@@ -298,6 +359,12 @@ def _bool(value: str | None) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _int(value: str | None, *, default: int = 0) -> int:
+    if value is None or not value.strip():
+        return default
+    return int(float(value))
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -461,6 +528,105 @@ def _exit_quality_recommendation(
     return "Exit distances are not the primary observed failure; prioritize regime and signal-quality filters."
 
 
+def _crowding_analysis(records: list[TradeLogRecord], rejected: dict[str, Any]) -> dict[str, Any]:
+    grouped = _group_metrics(records, lambda record: record.crowding_bucket)
+    rejections = rejected.get("rejections", {})
+    crowding_reasons = {
+        reason: int(count)
+        for reason, count in rejections.items()
+        if reason
+        in {
+            "funding_too_expensive",
+            "funding_delta_spike",
+            "open_interest_spike",
+            "adl_risk",
+            "liquidation_spike",
+            "market_stress",
+            "spread_too_wide",
+            "low_liquidity",
+        }
+    } if isinstance(rejections, dict) else {}
+    return {
+        "executed_by_crowding_bucket": grouped,
+        "rejected_by_crowding_reason": crowding_reasons,
+        "crowding_rejections": sum(crowding_reasons.values()),
+        "avg_funding_rate": _number(statistics.mean(record.funding_rate for record in records)) if records else 0.0,
+        "avg_open_interest_change_pct": _number(statistics.mean(record.open_interest_change_pct for record in records)) if records else 0.0,
+        "recommendation": _crowding_recommendation(grouped, crowding_reasons),
+    }
+
+
+def _crowding_recommendation(
+    grouped: dict[str, dict[str, Any]],
+    rejections: dict[str, int],
+) -> str:
+    stressed = [
+        metrics
+        for bucket, metrics in grouped.items()
+        if bucket != "normal" and float(metrics["expectancy"]) <= 0
+    ]
+    if stressed:
+        return "Crowded/stressed buckets are not paying; keep funding/OI/ADL/liquidation blocks active."
+    if sum(rejections.values()) > 0:
+        return "Crowding filters are active; compare rejected windows against subsequent price moves before loosening thresholds."
+    return "No material crowding diagnostics were present; ingest funding, OI, ADL, and liquidation data before promotion."
+
+
+def _timing_analysis(
+    by_day_of_week: dict[str, dict[str, Any]],
+    by_hour: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    best_day = _best_bucket(by_day_of_week)
+    best_hour = _best_bucket(by_hour)
+    return {
+        "by_day_of_week": by_day_of_week,
+        "by_entry_hour_utc": by_hour,
+        "best_day_of_week": best_day,
+        "best_entry_hour_utc": best_hour,
+        "recommendation": _timing_recommendation(best_day, best_hour),
+    }
+
+
+def _best_bucket(metrics_by_group: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    if not metrics_by_group:
+        return None
+    key, metrics = max(metrics_by_group.items(), key=lambda item: float(item[1]["expectancy"]))
+    return {"bucket": key, "metrics": metrics}
+
+
+def _timing_recommendation(best_day: dict[str, Any] | None, best_hour: dict[str, Any] | None) -> str:
+    if best_day is None and best_hour is None:
+        return "No timing data available."
+    parts: list[str] = []
+    if best_day is not None:
+        parts.append(f"best day bucket is {best_day['bucket']}")
+    if best_hour is not None:
+        parts.append(f"best hour bucket is {best_hour['bucket']}")
+    return "Validate timing filters out of sample before using them for hard entry blocks: " + ", ".join(parts) + "."
+
+
+def _correlated_exposure_analysis(records: list[TradeLogRecord]) -> dict[str, Any]:
+    symbol_pnl = _group_metrics(records, lambda record: record.symbol)
+    total_positive_pnl = sum(max(0.0, float(metrics["total_pnl"])) for metrics in symbol_pnl.values())
+    concentration: dict[str, float] = {}
+    if total_positive_pnl > 0:
+        concentration = {
+            symbol: _number(max(0.0, float(metrics["total_pnl"])) / total_positive_pnl) or 0.0
+            for symbol, metrics in symbol_pnl.items()
+        }
+    max_symbol_share = max(concentration.values()) if concentration else 0.0
+    return {
+        "symbol_pnl": symbol_pnl,
+        "positive_pnl_concentration": concentration,
+        "max_symbol_positive_pnl_share": _number(max_symbol_share),
+        "recommendation": (
+            "PnL is concentrated in one symbol; require correlation and symbol-concentration caps."
+            if max_symbol_share > 0.5
+            else "Symbol concentration is within the draft 50% promotion cap in this sample."
+        ),
+    }
+
+
 def _outlier_analysis(records: list[TradeLogRecord]) -> dict[str, Any]:
     losses = sorted((record for record in records if record.pnl < 0), key=lambda record: record.pnl)
     wins = sorted((record for record in records if record.pnl > 0), key=lambda record: record.pnl, reverse=True)
@@ -501,6 +667,13 @@ def _trade_snapshot(record: TradeLogRecord) -> dict[str, Any]:
 
 def _cost_analysis(records: list[TradeLogRecord], by_timeframe: dict[str, dict[str, Any]]) -> dict[str, Any]:
     overview = _metrics(records)
+    expected_costs = [record.expected_cost_bps for record in records if record.expected_cost_bps > 0]
+    expected_edges = [record.expected_edge_bps for record in records if record.expected_edge_bps > 0]
+    cost_to_edge = [
+        record.expected_cost_bps / record.expected_edge_bps
+        for record in records
+        if record.expected_edge_bps > 0 and record.expected_cost_bps >= 0
+    ]
     timeframe_drag = {
         timeframe: {
             "total_fees": metrics["total_fees"],
@@ -517,6 +690,9 @@ def _cost_analysis(records: list[TradeLogRecord], by_timeframe: dict[str, dict[s
         "net_after_fees": overview["total_pnl"],
         "avg_fee_per_trade": overview["avg_fee"],
         "fee_to_gross_profit_pct": overview["fee_to_gross_profit_pct"],
+        "avg_expected_cost_bps": _number(statistics.mean(expected_costs)) if expected_costs else 0.0,
+        "avg_expected_edge_bps": _number(statistics.mean(expected_edges)) if expected_edges else 0.0,
+        "avg_expected_cost_to_edge": _number(statistics.mean(cost_to_edge)) if cost_to_edge else 0.0,
         "timeframe_fee_drag": timeframe_drag,
     }
 
@@ -699,6 +875,9 @@ def _markdown_report(report: StrategyResearchReport) -> str:
     overview = report.overview
     rejected = report.rejected_signal_analysis
     exit_quality = report.exit_quality_analysis
+    crowding = report.crowding_analysis
+    timing = report.timing_analysis
+    correlation = report.correlated_exposure_analysis
     lines = [
         "# Strategy Research Diagnostics",
         "",
@@ -749,6 +928,14 @@ def _markdown_report(report: StrategyResearchReport) -> str:
             "",
             f"**Recommendation**: {exit_quality['recommendation']}",
             "",
+            "## Crowding And Exchange-Stress Analysis",
+            "",
+            f"- Crowding rejections: `{crowding['crowding_rejections']}`",
+            f"- Avg funding rate: `{crowding['avg_funding_rate']}`",
+            f"- Avg OI change pct: `{crowding['avg_open_interest_change_pct']}`",
+            "",
+            f"**Recommendation**: {crowding['recommendation']}",
+            "",
             "## Regime Performance Breakdown",
             "",
         ]
@@ -760,6 +947,24 @@ def _markdown_report(report: StrategyResearchReport) -> str:
     lines.extend(_group_section("Performance By Range Width", report.by_range_width_bucket))
     lines.extend(_group_section("Performance By EMA Regime Alignment", report.by_ema_alignment))
     lines.extend(_group_section("Performance By ADX Bucket", report.by_adx_bucket))
+    lines.extend(_group_section("Performance By Day Of Week", report.by_day_of_week))
+    lines.extend(
+        [
+            "## Timing Analysis",
+            "",
+            f"- Best day bucket: `{_best_bucket_label(timing.get('best_day_of_week'))}`",
+            f"- Best entry hour UTC: `{_best_bucket_label(timing.get('best_entry_hour_utc'))}`",
+            "",
+            f"**Recommendation**: {timing['recommendation']}",
+            "",
+            "## Correlated Exposure Analysis",
+            "",
+            f"- Max positive PnL share from one symbol: `{correlation['max_symbol_positive_pnl_share']}`",
+            "",
+            f"**Recommendation**: {correlation['recommendation']}",
+            "",
+        ]
+    )
     lines.extend(
         [
             "## Direct Answers",
@@ -861,3 +1066,10 @@ def _md(value: object) -> str:
     if value is None:
         return "n/a"
     return str(value)
+
+
+def _best_bucket_label(value: object) -> str:
+    if not isinstance(value, dict):
+        return "n/a"
+    bucket = value.get("bucket")
+    return str(bucket) if bucket is not None else "n/a"

@@ -110,6 +110,7 @@ class TestnetExecutionValidationReport(BaseModel):
 def run_testnet_execution_validation(
     *,
     client: TestnetExecutionClient,
+    strategy_name: str = "session_breakout",
     symbol: str = "ZECUSDT",
     timeframe: str = "15m",
     side: SignalSide = SignalSide.LONG,
@@ -139,7 +140,7 @@ def run_testnet_execution_validation(
         price_tick=price_tick,
     )
     report = TestnetExecutionValidationReport(
-        strategy_name="session_breakout",
+        strategy_name=strategy_name,
         symbol=normalized_symbol,
         timeframe=normalized_timeframe,
         side=side.name,

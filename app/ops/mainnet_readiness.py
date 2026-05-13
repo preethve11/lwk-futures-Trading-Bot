@@ -92,17 +92,17 @@ def _mainnet_mode_check(settings: Settings) -> ReadinessCheck:
 
 
 def _live_confirmation_check(settings: Settings) -> ReadinessCheck:
-    if settings.confirm_live_trading:
+    if settings.enable_live_trading and settings.confirm_live_trading:
         return ReadinessCheck(
             name="Live trading confirmation",
             status=ReadinessStatus.PASS,
-            detail="CONFIRM_LIVE_TRADING is true.",
+            detail="ENABLE_LIVE_TRADING and CONFIRM_LIVE_TRADING are true.",
         )
     return ReadinessCheck(
         name="Live trading confirmation",
         status=ReadinessStatus.FAIL,
-        detail="CONFIRM_LIVE_TRADING is false; live mainnet execution is blocked.",
-        remediation="Set CONFIRM_LIVE_TRADING=true only during a supervised small-notional mainnet window.",
+        detail="ENABLE_LIVE_TRADING or CONFIRM_LIVE_TRADING is false; live mainnet execution is blocked.",
+        remediation="Set both flags true only during a supervised small-notional mainnet window.",
     )
 
 

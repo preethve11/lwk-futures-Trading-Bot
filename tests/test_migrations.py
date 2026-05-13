@@ -33,6 +33,8 @@ def test_alembic_upgrade_head_creates_current_schema(tmp_path: Path) -> None:
     trade_columns = {column["name"] for column in inspector.get_columns("trades")}
     exchange_fill_columns = {column["name"] for column in inspector.get_columns("exchange_fills")}
     account_snapshot_columns = {column["name"] for column in inspector.get_columns("account_snapshots")}
+    market_data_columns = {column["name"] for column in inspector.get_columns("market_data")}
+    regime_columns = {column["name"] for column in inspector.get_columns("regimes")}
 
     assert "alembic_version" in tables
     assert {
@@ -48,6 +50,15 @@ def test_alembic_upgrade_head_creates_current_schema(tmp_path: Path) -> None:
         "ai_reports",
         "exchange_fills",
         "account_snapshots",
+        "market_data",
+        "features",
+        "regimes",
+        "strategies",
+        "backtest_results",
+        "executions",
+        "portfolio_allocations",
+        "performance_health",
+        "system_logs",
     }.issubset(tables)
     assert {
         "stop_order_id",
@@ -79,6 +90,22 @@ def test_alembic_upgrade_head_creates_current_schema(tmp_path: Path) -> None:
         "available_balance",
         "event_time",
     }.issubset(account_snapshot_columns)
+    assert {
+        "symbol",
+        "timeframe",
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+    }.issubset(market_data_columns)
+    assert {
+        "trend_state",
+        "volatility_state",
+        "liquidity_state",
+        "regime_id",
+    }.issubset(regime_columns)
 
 
 def test_api_startup_can_skip_auto_create_tables(tmp_path: Path) -> None:

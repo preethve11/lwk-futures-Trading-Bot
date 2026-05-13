@@ -14,9 +14,9 @@ def assert_live_trading_allowed(settings: Settings) -> None:
     """
     if settings.use_testnet:
         return
-    if settings.confirm_live_trading:
+    if settings.enable_live_trading and settings.confirm_live_trading:
         return
     raise RuntimeError(
-        "Live trading blocked: set CONFIRM_LIVE_TRADING=true only after "
+        "Live trading blocked: set ENABLE_LIVE_TRADING=true and CONFIRM_LIVE_TRADING=true only after "
         "validating the strategy and risk controls on Binance testnet."
     )

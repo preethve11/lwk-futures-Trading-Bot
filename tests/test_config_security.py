@@ -95,6 +95,7 @@ def test_live_guard_blocks_unconfirmed_mainnet(tmp_path: Path) -> None:
 def test_live_guard_allows_confirmed_mainnet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text("api:\n  use_testnet: false\n", encoding="utf-8")
+    monkeypatch.setenv("ENABLE_LIVE_TRADING", "true")
     monkeypatch.setenv("CONFIRM_LIVE_TRADING", "true")
     settings = load_settings(config_path=config_path, project_root=tmp_path)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,16 +12,25 @@ from sqlalchemy.orm import Session
 from app.persistence.models import (
     AIReportModel,
     AccountSnapshotModel,
+    BacktestResultModel,
     BacktestRunModel,
     BotSessionModel,
     ConfigModel,
     ExchangeFillModel,
+    ExecutionModel,
+    FeatureModel,
+    MarketDataModel,
     OrderLifecycleState,
     OrderModel,
+    PerformanceHealthModel,
+    PortfolioAllocationModel,
     PositionModel,
+    RegimeModel,
     RiskEventModel,
     RiskStateModel,
     SignalModel,
+    StrategyModel,
+    SystemLogModel,
     TradeModel,
     utc_now,
 )
@@ -267,7 +276,7 @@ class OrderRepository:
         if fill_aggregate is not None and fill_aggregate.avg_price is not None:
             return fill_aggregate.avg_price
         if status.avg_price is not None and status.avg_price > 0:
-            return cast(float, status.avg_price)
+            return float(status.avg_price)
         return current_avg_price
 
     def _fill_aggregate_payload(self, fill_aggregate: ExchangeFillAggregate | None) -> dict[str, object]:
@@ -766,5 +775,404 @@ class RiskStateRepository:
         if reason is not None:
             model.reason = reason
         model.updated_at = utc_now()
+        self.session.flush()
+        return model
+
+
+class MarketDataRepository:
+    """Persistence operations for normalized OHLCV candles."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_candle(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        open_time: datetime,
+        open_price: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: float,
+        close_time: datetime | None = None,
+        quote_volume: float = 0.0,
+        trades_count: int | None = None,
+        source: str = "unknown",
+        is_closed: bool = True,
+    ) -> MarketDataModel:
+        statement = (
+            select(MarketDataModel)
+            .where(MarketDataModel.symbol == symbol.upper())
+            .where(MarketDataModel.timeframe == timeframe)
+            .where(MarketDataModel.open_time == open_time)
+        )
+        model = self.session.scalar(statement)
+        if model is None:
+            model = MarketDataModel(
+                symbol=symbol.upper(),
+                timeframe=timeframe,
+                open_time=open_time,
+                close_time=close_time,
+                open=open_price,
+                high=high,
+                low=low,
+                close=close,
+                volume=volume,
+                quote_volume=quote_volume,
+                trades_count=trades_count,
+                source=source,
+                is_closed=is_closed,
+            )
+            self.session.add(model)
+        else:
+            model.close_time = close_time
+            model.open = open_price
+            model.high = high
+            model.low = low
+            model.close = close
+            model.volume = volume
+            model.quote_volume = quote_volume
+            model.trades_count = trades_count
+            model.source = source
+            model.is_closed = is_closed
+            model.updated_at = utc_now()
+        self.session.flush()
+        return model
+
+    def list_candles(self, *, symbol: str, timeframe: str, limit: int = 500) -> list[MarketDataModel]:
+        statement = (
+            select(MarketDataModel)
+            .where(MarketDataModel.symbol == symbol.upper())
+            .where(MarketDataModel.timeframe == timeframe)
+            .order_by(MarketDataModel.open_time.desc())
+            .limit(limit)
+        )
+        return list(reversed(list(self.session.scalars(statement))))
+
+
+class FeatureRepository:
+    """Persistence operations for generated feature snapshots."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_features(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        event_time: datetime,
+        payload: dict[str, object],
+        feature_set_version: str = "v1",
+    ) -> FeatureModel:
+        statement = (
+            select(FeatureModel)
+            .where(FeatureModel.symbol == symbol.upper())
+            .where(FeatureModel.timeframe == timeframe)
+            .where(FeatureModel.event_time == event_time)
+            .where(FeatureModel.feature_set_version == feature_set_version)
+        )
+        model = self.session.scalar(statement)
+        if model is None:
+            model = FeatureModel(
+                symbol=symbol.upper(),
+                timeframe=timeframe,
+                event_time=event_time,
+                feature_set_version=feature_set_version,
+                payload=payload,
+            )
+            self.session.add(model)
+        else:
+            model.payload = payload
+        self.session.flush()
+        return model
+
+
+class RegimeRepository:
+    """Persistence operations for market regime labels."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_regime(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        event_time: datetime,
+        trend_state: str,
+        volatility_state: str,
+        liquidity_state: str,
+        regime_id: str,
+        detector_version: str = "v1",
+        payload: dict[str, object] | None = None,
+    ) -> RegimeModel:
+        statement = (
+            select(RegimeModel)
+            .where(RegimeModel.symbol == symbol.upper())
+            .where(RegimeModel.timeframe == timeframe)
+            .where(RegimeModel.event_time == event_time)
+            .where(RegimeModel.detector_version == detector_version)
+        )
+        model = self.session.scalar(statement)
+        if model is None:
+            model = RegimeModel(
+                symbol=symbol.upper(),
+                timeframe=timeframe,
+                event_time=event_time,
+                detector_version=detector_version,
+                trend_state=trend_state,
+                volatility_state=volatility_state,
+                liquidity_state=liquidity_state,
+                regime_id=regime_id,
+                payload=payload or {},
+            )
+            self.session.add(model)
+        else:
+            model.trend_state = trend_state
+            model.volatility_state = volatility_state
+            model.liquidity_state = liquidity_state
+            model.regime_id = regime_id
+            model.payload = payload or {}
+        self.session.flush()
+        return model
+
+
+class StrategyMetadataRepository:
+    """Persistence operations for strategy candidate metadata."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(
+        self,
+        *,
+        strategy_id: str,
+        name: str,
+        family: str = "",
+        version: str = "v1",
+        status: str = "candidate",
+        parameters: dict[str, object] | None = None,
+        allowed_regimes: list[str] | None = None,
+    ) -> StrategyModel:
+        model = self.session.scalar(select(StrategyModel).where(StrategyModel.strategy_id == strategy_id))
+        if model is None:
+            model = StrategyModel(
+                strategy_id=strategy_id,
+                name=name,
+                family=family,
+                version=version,
+                status=status,
+                parameters=parameters or {},
+                allowed_regimes=allowed_regimes or [],
+            )
+            self.session.add(model)
+        else:
+            model.name = name
+            model.family = family
+            model.version = version
+            model.status = status
+            model.parameters = parameters or {}
+            model.allowed_regimes = allowed_regimes or []
+            model.updated_at = utc_now()
+        self.session.flush()
+        return model
+
+
+class BacktestResultRepository:
+    """Persistence operations for strategy validation results."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        run_id: str,
+        strategy_id: str,
+        symbol: str,
+        timeframe: str,
+        metrics: dict[str, object],
+        regime_metrics: dict[str, object] | None = None,
+        fee_bps: float = 0.0,
+        slippage_bps: float = 0.0,
+        passed_validation: bool = False,
+        rejection_reason: str = "",
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> BacktestResultModel:
+        model = BacktestResultModel(
+            run_id=run_id,
+            strategy_id=strategy_id,
+            symbol=symbol.upper(),
+            timeframe=timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            metrics=metrics,
+            regime_metrics=regime_metrics or {},
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+            passed_validation=passed_validation,
+            rejection_reason=rejection_reason,
+        )
+        self.session.add(model)
+        self.session.flush()
+        return model
+
+
+class ExecutionRepository:
+    """Persistence operations for order execution quality records."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        quantity: float,
+        strategy_id: str = "",
+        mode: str = "paper",
+        order_type: str = "MARKET",
+        order_id: int | None = None,
+        exchange_execution_id: str | None = None,
+        expected_price: float | None = None,
+        actual_price: float | None = None,
+        fee: float = 0.0,
+        fee_asset: str = "",
+        slippage_bps: float | None = None,
+        latency_ms: float | None = None,
+        status: str = "submitted",
+        raw_payload: dict[str, object] | None = None,
+        event_time: datetime | None = None,
+    ) -> ExecutionModel:
+        model = ExecutionModel(
+            order_id=order_id,
+            exchange_execution_id=exchange_execution_id,
+            symbol=symbol.upper(),
+            strategy_id=strategy_id,
+            mode=mode,
+            side=side,
+            order_type=order_type,
+            expected_price=expected_price,
+            actual_price=actual_price,
+            quantity=quantity,
+            fee=fee,
+            fee_asset=fee_asset,
+            slippage_bps=slippage_bps,
+            latency_ms=latency_ms,
+            status=status,
+            raw_payload=raw_payload or {},
+            event_time=event_time or utc_now(),
+        )
+        self.session.add(model)
+        self.session.flush()
+        return model
+
+
+class PortfolioAllocationRepository:
+    """Persistence operations for meta-allocator decisions."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        strategy_id: str,
+        allocated_capital: float,
+        weight: float,
+        symbol: str = "",
+        max_weight: float = 0.30,
+        regime_id: str = "",
+        reason: str = "",
+        active: bool = True,
+    ) -> PortfolioAllocationModel:
+        model = PortfolioAllocationModel(
+            strategy_id=strategy_id,
+            symbol=symbol.upper(),
+            allocated_capital=allocated_capital,
+            weight=min(weight, max_weight),
+            max_weight=max_weight,
+            regime_id=regime_id,
+            reason=reason,
+            active=active,
+        )
+        self.session.add(model)
+        self.session.flush()
+        return model
+
+
+class PerformanceHealthRepository:
+    """Persistence operations for strategy health snapshots."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        strategy_id: str,
+        status: str,
+        symbol: str = "",
+        timeframe: str = "",
+        expectancy: float = 0.0,
+        profit_factor: float = 0.0,
+        sharpe_ratio: float = 0.0,
+        max_drawdown_pct: float = 0.0,
+        win_rate: float = 0.0,
+        trade_count: int = 0,
+        slippage_bps: float = 0.0,
+        degradation_pct: float = 0.0,
+        reason: str = "",
+        payload: dict[str, object] | None = None,
+    ) -> PerformanceHealthModel:
+        model = PerformanceHealthModel(
+            strategy_id=strategy_id,
+            symbol=symbol.upper(),
+            timeframe=timeframe,
+            status=status,
+            expectancy=expectancy,
+            profit_factor=profit_factor,
+            sharpe_ratio=sharpe_ratio,
+            max_drawdown_pct=max_drawdown_pct,
+            win_rate=win_rate,
+            trade_count=trade_count,
+            slippage_bps=slippage_bps,
+            degradation_pct=degradation_pct,
+            reason=reason,
+            payload=payload or {},
+        )
+        self.session.add(model)
+        self.session.flush()
+        return model
+
+
+class SystemLogRepository:
+    """Persistence operations for structured system logs."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        level: str,
+        message: str,
+        logger: str = "",
+        event_type: str = "",
+        payload: dict[str, object] | None = None,
+    ) -> SystemLogModel:
+        model = SystemLogModel(
+            level=level.upper(),
+            logger=logger,
+            event_type=event_type,
+            message=message,
+            payload=payload or {},
+        )
+        self.session.add(model)
         self.session.flush()
         return model
